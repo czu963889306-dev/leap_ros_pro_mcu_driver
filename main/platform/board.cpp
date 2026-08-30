@@ -6,13 +6,13 @@
 static const char* TAG = "BOARD_INIT";
 
 // 电机引脚 (M3=FL, M4=FR, M2=BL, M1=BR)
-const gpio_num_t kMotorFL_In1 = GPIO_NUM_5;  const gpio_num_t kMotorFL_In2 = GPIO_NUM_4;
+const gpio_num_t kMotorFL_In1 = GPIO_NUM_4;  const gpio_num_t kMotorFL_In2 = GPIO_NUM_5;
 const gpio_num_t kEncoderFL_A = GPIO_NUM_6;  const gpio_num_t kEncoderFL_B = GPIO_NUM_7;
 
 const gpio_num_t kMotorFR_In1 = GPIO_NUM_3;  const gpio_num_t kMotorFR_In2 = GPIO_NUM_8;
 const gpio_num_t kEncoderFR_A = GPIO_NUM_19; const gpio_num_t kEncoderFR_B = GPIO_NUM_20;
 
-const gpio_num_t kMotorBL_In1 = GPIO_NUM_16; const gpio_num_t kMotorBL_In2 = GPIO_NUM_15;
+const gpio_num_t kMotorBL_In1 = GPIO_NUM_15; const gpio_num_t kMotorBL_In2 = GPIO_NUM_16;
 const gpio_num_t kEncoderBL_A = GPIO_NUM_17; const gpio_num_t kEncoderBL_B = GPIO_NUM_18;
 
 const gpio_num_t kMotorBR_In1 = GPIO_NUM_9; const gpio_num_t kMotorBR_In2 = GPIO_NUM_46;
@@ -39,12 +39,11 @@ const gpio_num_t kIo0ButtonPin = GPIO_NUM_0;
 // ================= 对象实例化 =================
 Lsm6ds3Imu imu(I2C_NUM_0, GPIO_NUM_12, GPIO_NUM_13);
 
-// FL and BL are mirrored mechanically, so swap IN1/IN2 here.
-// This keeps SetSpeed(+) aligned with the chassis forward convention.
+// Motor polarity is inverted here so SetSpeed(+) matches chassis forward.
 At8236Motor motor_fl(kMotorFL_In2, kMotorFL_In1);
-At8236Motor motor_fr(kMotorFR_In1, kMotorFR_In2);
+At8236Motor motor_fr(kMotorFR_In2, kMotorFR_In1);
 At8236Motor motor_bl(kMotorBL_In2, kMotorBL_In1);
-At8236Motor motor_br(kMotorBR_In1, kMotorBR_In2);
+At8236Motor motor_br(kMotorBR_In2, kMotorBR_In1);
 
 // 实例化编码器
 QuadratureEncoder encoder_fl(kEncoderFL_A, kEncoderFL_B);
