@@ -1,0 +1,59 @@
+set(APP_SRCS
+    "app_main.cpp"
+    "app_runtime.cpp"
+    "config/pid_config.cpp"
+    "core/system_globals.cpp"
+    "platform/board.cpp"
+    "control/arm_kinematics.cpp"
+    "control/motion_controller.cpp"
+    "tasks/control/arm_task.cpp"
+    "tasks/control/motion_task.cpp"
+    "tasks/sensors/imu_task.cpp"
+    "tasks/sensors/ultrasonic_task.cpp"
+    "tasks/sensors/lidar_task.cpp"
+    "tasks/io/peripheral_task.cpp"
+    "tasks/io/gamepad_i2c_task.cpp"
+    "tasks/network/mavlink_common.cpp"
+    "tasks/network/mavlink_udp_task.cpp"
+    "tasks/network/mavlink_uart_task.cpp"
+    "tasks/network/wifi_provision_task.cpp"
+    "tasks/network/microros_task.cpp"
+    "network/wifi_app.cpp"
+)
+
+idf_component_register(
+    SRCS ${APP_SRCS}
+    INCLUDE_DIRS
+        "."
+        "config"
+        "core"
+        "platform"
+        "control"
+        "msg"
+        "network"
+        "tasks/network"
+        "../components/i2c_bus_lock"
+        "../components/mavlink_lib"
+    REQUIRES
+        esp_http_server
+        esp_wifi
+        esp_netif
+        esp_driver_tsens
+        spi_flash
+        nvs_flash
+        lwip
+        motor_driver
+        encoder_driver
+        ultrasonic_sensor
+        ws2812_driver
+        button_driver
+        servo_driver
+        lsm6ds3_driver
+        pid_controller
+        ldstl26_lidar
+        status_led
+        camera_i2c_client
+        i2c_bus_lock
+        mavlink_lib
+        micro_ros_espidf_component
+)
