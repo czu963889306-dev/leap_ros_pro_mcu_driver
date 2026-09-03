@@ -6,7 +6,7 @@
 
 class ServoDriver {
  public:
-  ServoDriver(gpio_num_t pin, int group_id, float default_angle = 90.0f);
+  ServoDriver(gpio_num_t pin, int group_id, float default_angle = 90.0f, bool reversed = false);
 
   bool Init();
   void SetAngle(float angle);
@@ -15,6 +15,7 @@ class ServoDriver {
   gpio_num_t pin_;
   int group_id_;
   float default_angle_;
+  bool reversed_;
   mcpwm_timer_handle_t timer_;
   mcpwm_oper_handle_t oper_;
   mcpwm_cmpr_handle_t comparator_; // 比较器句柄，用于调节占空比

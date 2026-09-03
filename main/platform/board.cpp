@@ -60,7 +60,7 @@ StatusLed status_led(kStatusLedPin);
 ButtonDriver io0_button(kIo0ButtonPin, true);
 ServoDriver servo_1(kServo1Pin, 0);
 ServoDriver servo_2(kServo2Pin, 0);
-ServoDriver servo_3(kServo3Pin, 1);
+ServoDriver servo_3(kServo3Pin, 1, 90.0f, true);
 ServoDriver servo_4(kServo4Pin, 1);
 ServoDriver servo_5(kServo5Pin, 1, kServoStartupAngles[4]);
 

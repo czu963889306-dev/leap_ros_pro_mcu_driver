@@ -1,9 +1,10 @@
 #include "servo_driver.h"
 
-ServoDriver::ServoDriver(gpio_num_t pin, int group_id, float default_angle)
+ServoDriver::ServoDriver(gpio_num_t pin, int group_id, float default_angle, bool reversed)
     : pin_(pin),
       group_id_(group_id),
       default_angle_(default_angle),
+      reversed_(reversed),
       timer_(nullptr),
       oper_(nullptr),
       comparator_(nullptr),
@@ -75,6 +76,7 @@ void ServoDriver::SetAngle(float angle) {
 
   if (angle < 0.0f) angle = 0.0f;
   if (angle > kMaxAngle) angle = kMaxAngle;
+  if (reversed_) angle = kMaxAngle - angle;
 
   // 根据角度计算需要的脉宽时间 (单位: 微秒)
   uint32_t pulse_width_us = kMinPulseWidthUs + (angle / kMaxAngle) * (kMaxPulseWidthUs - kMinPulseWidthUs);
