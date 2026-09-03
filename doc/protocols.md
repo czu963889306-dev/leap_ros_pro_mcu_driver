@@ -9,6 +9,7 @@ The firmware supports one active communication mode at a time:
 | Mode | Runtime value | Default |
 | --- | --- | --- |
 | micro-ROS | `micro_ros` | yes |
+| micro-ROS UART | `microros_uart` | no |
 | MAVLink UDP | `mavlink_udp` | no |
 | MAVLink UART | `uart_mavlink` | no |
 
@@ -48,13 +49,18 @@ the left wheels and `+170 mm/s` on the right wheels.
 
 ## micro-ROS
 
-Transport: custom UDP transport over Wi-Fi.
+Transport: `micro_ros` mode uses custom UDP transport over Wi-Fi. `microros_uart`
+mode uses a UART2 custom serial transport and does not require a STA connection.
 
 | Item | Value |
 | --- | --- |
 | Node name | `leap_low_driver` |
 | Local UDP port | `CONFIG_MICRO_ROS_LOCAL_PORT`, default `8888` |
 | Agent address | runtime `g_microros_agent_ip:g_microros_agent_port`, default `192.168.31.214:8888` |
+| UART port | UART2 |
+| UART TX pin | GPIO37 |
+| UART RX pin | GPIO38 |
+| UART baud rate | `460800`, 8N1, no hardware flow control |
 | Timer period | 20 ms |
 
 ### Subscribed Topics
@@ -217,6 +223,7 @@ Only the active mode sends communication traffic:
 | Active mode | Behavior |
 | --- | --- |
 | `micro_ros` | micro-ROS entities are created and spun; MAVLink UDP and MAVLink UART do not publish or receive |
+| `microros_uart` | micro-ROS uses UART2 and starts without STA; micro-ROS UDP, MAVLink UDP, and MAVLink UART are inactive |
 | `mavlink_udp` | MAVLink UDP task receives and publishes; micro-ROS and MAVLink UART are inactive |
 | `uart_mavlink` | MAVLink UART task receives and publishes; micro-ROS and MAVLink UDP are inactive |
 

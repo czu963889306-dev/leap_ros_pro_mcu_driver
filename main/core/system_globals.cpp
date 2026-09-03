@@ -11,12 +11,15 @@ char g_device_name[32] = "Maturo_UNKNOWN";
 bool wifi_comm_mode_is_valid(WifiCommMode mode) {
     return mode == WifiCommMode::kMavlinkUdp ||
            mode == WifiCommMode::kMicroRos ||
-           mode == WifiCommMode::kMavlinkUart;
+           mode == WifiCommMode::kMavlinkUart ||
+           mode == WifiCommMode::kMicroRosUart;
 }
 
 WifiCommMode wifi_comm_mode_next(WifiCommMode mode) {
     switch (mode) {
     case WifiCommMode::kMicroRos:
+        return WifiCommMode::kMicroRosUart;
+    case WifiCommMode::kMicroRosUart:
         return WifiCommMode::kMavlinkUdp;
     case WifiCommMode::kMavlinkUdp:
         return WifiCommMode::kMavlinkUart;
@@ -34,6 +37,8 @@ const char *wifi_comm_mode_to_runtime_value(WifiCommMode mode) {
         return "mavlink_udp";
     case WifiCommMode::kMavlinkUart:
         return "uart_mavlink";
+    case WifiCommMode::kMicroRosUart:
+        return "microros_uart";
     default:
         return "unknown";
     }
@@ -47,6 +52,8 @@ const char *wifi_comm_mode_to_display_name(WifiCommMode mode) {
         return "MAVLink UDP";
     case WifiCommMode::kMavlinkUart:
         return "MAVLink UART";
+    case WifiCommMode::kMicroRosUart:
+        return "micro-ROS UART";
     default:
         return "Unknown";
     }
