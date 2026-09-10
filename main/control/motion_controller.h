@@ -6,7 +6,7 @@
 #include "pid_controller.h"
 
 enum class ControlMode { kVelocity, kDirectPwm };
-enum class ChassisType { kMecanum, kDifferential };
+enum class ChassisType : uint8_t { kMecanum = 0, kDifferential = 1 };
 
 enum class MotorID {
   kFrontLeft = 0, kFrontRight = 1, kBackLeft = 2, kBackRight = 3

@@ -7,6 +7,7 @@
 #include "msg/motion_msg.h"
 #include "msg/temperature_msg.h"
 #include "msg/ultrasonic_msg.h"
+#include "motion_controller.h"
 
 #include <ctype.h>
 #include <limits.h>
@@ -36,6 +37,8 @@ static constexpr size_t kMaxScanResults = 20;
 static constexpr size_t kDnsPacketMaxSize = 512;
 static constexpr size_t kScanJsonSize = 4096;
 static constexpr size_t kStatusJsonSize = 8192;
+static constexpr int kCaptiveDnsIpRetryCount = 20;
+static constexpr int kCaptiveDnsIpRetryDelayMs = 250;
 
 static SemaphoreHandle_t s_http_buffer_mutex = nullptr;
 static wifi_ap_record_t s_scan_records[kMaxScanResults] = {};
@@ -435,7 +438,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
     </section>
     <section class="config-panel">
       <div class="row">
-        <h2 id="runtime-title" class="section-title">通信设置</h2>
+        <h2 id="runtime-title" class="section-title">运行设置</h2>
         <div id="runtime-status" class="updated">加载中...</div>
       </div>
       <form id="runtime-form">
@@ -444,8 +447,13 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
           <select id="comm-mode" name="comm_mode">
             <option value="micro_ros">micro-ROS</option>
             <option value="microros_uart">micro-ROS UART</option>
-            <option value="mavlink_udp">MAVLink UDP</option>
-            <option value="uart_mavlink">MAVLink UART</option>
+          </select>
+        </div>
+        <div>
+          <label id="chassis-type-label" for="chassis-type">底盘类型</label>
+          <select id="chassis-type" name="chassis_type">
+            <option id="chassis-mecanum-option" value="mecanum">麦克纳姆轮</option>
+            <option id="chassis-differential-option" value="differential">四轮差速</option>
           </select>
         </div>
         <div>
@@ -456,7 +464,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
           <label id="agent-port-label" for="agent-port">micro-ROS Agent Port</label>
           <input id="agent-port" name="microros_agent_port" type="number" min="1" max="65535" required>
         </div>
-        <button id="runtime-submit-btn" class="submit" type="submit">保存通信设置并重启</button>
+        <button id="runtime-submit-btn" class="submit" type="submit">保存运行设置并重启</button>
       </form>
     </section>
     <section class="dashboard">
@@ -495,6 +503,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
           <div class="kv"><span>Wheel</span><strong id="stat-wheel">--</strong></div>
           <div class="kv"><span>Target</span><strong id="stat-target">--</strong></div>
           <div class="kv"><span>Mode</span><strong id="stat-motion-mode">--</strong></div>
+          <div class="kv"><span id="stat-chassis-label">Chassis</span><strong id="stat-chassis">--</strong></div>
         </div>
         <div class="status-panel">
           <h3 id="panel-sensor-title">传感器</h3>
@@ -508,6 +517,8 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
           <div class="kv"><span>SSID</span><strong id="stat-wifi-ssid">--</strong></div>
           <div class="kv"><span>RSSI</span><strong id="stat-wifi-rssi">--</strong></div>
           <div class="kv"><span>AP IP</span><strong id="stat-ap-ip">--</strong></div>
+          <div class="kv"><span>Host</span><strong id="stat-hostname">--</strong></div>
+          <div class="kv"><span>Host IP</span><strong id="stat-hostip">--</strong></div>
         </div>
         <div class="status-panel">
           <h3 id="panel-camera-title">摄像头</h3>
@@ -556,6 +567,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
     const passwordInput = document.getElementById('password');
     const runtimeForm = document.getElementById('runtime-form');
     const commModeInput = document.getElementById('comm-mode');
+    const chassisTypeInput = document.getElementById('chassis-type');
     const agentIpInput = document.getElementById('agent-ip');
     const agentPortInput = document.getElementById('agent-port');
     const cameraForm = document.getElementById('camera-form');
@@ -599,14 +611,17 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
         statusWaiting: '等待状态数据...',
         statusUpdated: (time) => `已更新 ${time}`,
         statusFailed: (message) => `状态读取失败：${message}`,
-        runtimeTitle: '通信设置',
+        runtimeTitle: '运行设置',
         runtimeLoading: '加载中...',
         runtimeSaved: '已保存，设备正在重启...',
         runtimeSaveFailed: (message) => `保存失败：${message}`,
         commModeLabel: '默认通信协议',
+        chassisTypeLabel: '底盘类型',
+        chassisMecanum: '麦克纳姆轮',
+        chassisDifferential: '四轮差速',
         agentIpLabel: 'micro-ROS Agent IP',
         agentPortLabel: 'micro-ROS Agent Port',
-        runtimeSubmit: '保存通信设置并重启',
+        runtimeSubmit: '保存运行设置并重启',
         cameraProvisionSaved: '摄像头配网命令已发送，等待摄像头重启或更新状态...',
         cameraProvisionFailed: (message) => `摄像头配网失败：${message}`,
         cameraSsidLabel: '摄像头 Wi-Fi 名称',
@@ -621,6 +636,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
         panelSystem: '系统',
         panelImu: 'IMU',
         panelMotion: '运动',
+        chassisStatusLabel: '底盘',
         panelSensor: '传感器',
         panelWifi: '网络',
         panelCamera: '摄像头',
@@ -663,14 +679,17 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
         statusWaiting: 'Waiting for status data...',
         statusUpdated: (time) => `Updated ${time}`,
         statusFailed: (message) => `Status failed: ${message}`,
-        runtimeTitle: 'Communication Settings',
+        runtimeTitle: 'Runtime Settings',
         runtimeLoading: 'Loading...',
         runtimeSaved: 'Saved. Device is restarting...',
         runtimeSaveFailed: (message) => `Save failed: ${message}`,
         commModeLabel: 'Default Protocol',
+        chassisTypeLabel: 'Chassis Type',
+        chassisMecanum: 'Mecanum',
+        chassisDifferential: '4WD Differential',
         agentIpLabel: 'micro-ROS Agent IP',
         agentPortLabel: 'micro-ROS Agent Port',
-        runtimeSubmit: 'Save Settings and Restart',
+        runtimeSubmit: 'Save Runtime Settings and Restart',
         cameraProvisionSaved: 'Camera provisioning command sent. Waiting for the camera to restart or update status...',
         cameraProvisionFailed: (message) => `Camera provisioning failed: ${message}`,
         cameraSsidLabel: 'Camera Wi-Fi Name',
@@ -685,6 +704,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
         panelSystem: 'System',
         panelImu: 'IMU',
         panelMotion: 'Motion',
+        chassisStatusLabel: 'Chassis',
         panelSensor: 'Sensors',
         panelWifi: 'Network',
         panelCamera: 'Camera',
@@ -724,6 +744,9 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       document.getElementById('status-title').textContent = i18n.statusTitle;
       document.getElementById('runtime-title').textContent = i18n.runtimeTitle;
       document.getElementById('comm-mode-label').textContent = i18n.commModeLabel;
+      document.getElementById('chassis-type-label').textContent = i18n.chassisTypeLabel;
+      document.getElementById('chassis-mecanum-option').textContent = i18n.chassisMecanum;
+      document.getElementById('chassis-differential-option').textContent = i18n.chassisDifferential;
       document.getElementById('agent-ip-label').textContent = i18n.agentIpLabel;
       document.getElementById('agent-port-label').textContent = i18n.agentPortLabel;
       document.getElementById('runtime-submit-btn').textContent = i18n.runtimeSubmit;
@@ -739,6 +762,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       document.getElementById('panel-system-title').textContent = i18n.panelSystem;
       document.getElementById('panel-imu-title').textContent = i18n.panelImu;
       document.getElementById('panel-motion-title').textContent = i18n.panelMotion;
+      document.getElementById('stat-chassis-label').textContent = i18n.chassisStatusLabel;
       document.getElementById('panel-sensor-title').textContent = i18n.panelSensor;
       document.getElementById('panel-wifi-title').textContent = i18n.panelWifi;
       document.getElementById('panel-camera-title').textContent = i18n.panelCamera;
@@ -884,6 +908,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       const pid = data.pid || {};
       const runtime = data.runtime || {};
       const camera = data.camera || {};
+      const targetHost = data.target_host || {};
 
       text('metric-device', data.device_name || '--');
       text('metric-wifi', wifi.sta_connected ? i18n.connected : `${wifi.mode || '--'}`);
@@ -911,6 +936,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       text('stat-wheel', motion.valid ? `FL/FR/BL/BR ${fixed(motion.vel_fl, 0)} / ${fixed(motion.vel_fr, 0)} / ${fixed(motion.vel_bl, 0)} / ${fixed(motion.vel_br, 0)} mm/s` : i18n.invalid);
       text('stat-target', motion.valid ? `${fixed(motion.target_vx, 0)}, ${fixed(motion.target_vy, 0)} | ${fixed(motion.target_wz, 2)}` : i18n.invalid);
       text('stat-motion-mode', motion.valid ? `${motion.control_mode} / src ${motion.source}` : i18n.invalid);
+      text('stat-chassis', runtime.chassis_type || '--');
 
       text('stat-ultrasonic', ultrasonic.valid ? `${fixed(ultrasonic.distance_cm, 1)} cm | ${ultrasonic.obstacle ? 'OBS' : 'clear'}` : i18n.invalid);
       text('stat-lidar', lidar.valid ? `${lidar.valid_points} pts | ${lidar.min_mm}-${lidar.max_mm} mm` : i18n.invalid);
@@ -920,6 +946,8 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       text('stat-wifi-ssid', wifi.ssid || '--');
       text('stat-wifi-rssi', Number.isFinite(wifi.rssi) ? `${wifi.rssi} dBm` : '--');
       text('stat-ap-ip', wifi.ap_ip || '--');
+      text('stat-hostname', targetHost.valid ? (targetHost.hostname || '--') : '--');
+      text('stat-hostip', targetHost.valid ? (targetHost.hostip || '--') : '--');
 
       text('stat-camera-state', camera.reachable ? (camera.valid ? i18n.connected : i18n.invalid) : i18n.disconnected);
       text('stat-camera-name', camera.name || '--');
@@ -932,10 +960,11 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
 
       if (!runtimeFormDirty) {
         if (runtime.comm_mode) commModeInput.value = runtime.comm_mode;
+        if (runtime.chassis_type) chassisTypeInput.value = runtime.chassis_type;
         if (runtime.microros_agent_ip) agentIpInput.value = runtime.microros_agent_ip;
         if (runtime.microros_agent_port) agentPortInput.value = runtime.microros_agent_port;
       }
-      text('runtime-status', `${runtime.comm_mode || '--'} | ${runtime.microros_agent_ip || '--'}:${runtime.microros_agent_port || '--'}`);
+      text('runtime-status', `${runtime.comm_mode || '--'} | ${runtime.chassis_type || '--'} | ${runtime.microros_agent_ip || '--'}:${runtime.microros_agent_port || '--'}`);
     }
 
     async function refreshStatus() {
@@ -962,6 +991,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       const i18n = getI18n();
       const body = new URLSearchParams();
       body.set('comm_mode', commModeInput.value);
+      body.set('chassis_type', chassisTypeInput.value);
       body.set('microros_agent_ip', agentIpInput.value.trim());
       body.set('microros_agent_port', agentPortInput.value.trim());
       try {
@@ -1103,12 +1133,19 @@ static bool parse_comm_mode(const char *value, WifiCommMode *mode) {
         *mode = WifiCommMode::kMicroRosUart;
         return true;
     }
-    if (strcmp(value, "mavlink_udp") == 0 || strcmp(value, "mavlink") == 0) {
-        *mode = WifiCommMode::kMavlinkUdp;
+    return false;
+}
+
+static bool parse_chassis_type(const char *value, ChassisType *type) {
+    if (value == NULL || type == NULL) {
+        return false;
+    }
+    if (strcmp(value, "mecanum") == 0) {
+        *type = ChassisType::kMecanum;
         return true;
     }
-    if (strcmp(value, "uart_mavlink") == 0 || strcmp(value, "mavlink_uart") == 0) {
-        *mode = WifiCommMode::kMavlinkUart;
+    if (strcmp(value, "differential") == 0 || strcmp(value, "4wd_differential") == 0) {
+        *type = ChassisType::kDifferential;
         return true;
     }
     return false;
@@ -1523,6 +1560,12 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
         kStatusJsonSize,
         &offset,
         wifi_comm_mode_to_runtime_value(g_wifi_comm_mode));
+    ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, ",\"chassis_type\":");
+    ok = ok && append_json_string(
+        s_status_json,
+        kStatusJsonSize,
+        &offset,
+        chassis_type_to_runtime_value(g_chassis_type));
     ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, ",\"microros_agent_ip\":");
     ok = ok && append_json_string(s_status_json, kStatusJsonSize, &offset, g_microros_agent_ip);
     ok = ok && append_format(
@@ -1548,6 +1591,25 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
             ",\"ap_ip\":\"" IPSTR "\"",
             IP2STR(&ap_ip_info.ip));
     }
+    ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, "}");
+
+    ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, ",\"target_host\":{");
+    ok = ok && append_format(
+        s_status_json,
+        kStatusJsonSize,
+        &offset,
+        "\"valid\":%s,\"last_update_ms\":%lu,\"hostname\":",
+        g_target_host_info.valid ? "true" : "false",
+        static_cast<unsigned long>(g_target_host_info.last_update_ms));
+    ok = ok && append_json_string(
+        s_status_json,
+        kStatusJsonSize,
+        &offset,
+        g_target_host_info.hostname);
+    ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, ",\"hostip\":");
+    ok = ok && append_json_string(s_status_json, kStatusJsonSize, &offset, g_target_host_info.hostip);
+    ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, ",\"text\":");
+    ok = ok && append_json_string(s_status_json, kStatusJsonSize, &offset, g_target_host_info.text);
     ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, "}");
 
     ok = ok && append_text(s_status_json, kStatusJsonSize, &offset, ",\"camera\":");
@@ -1807,15 +1869,21 @@ static esp_err_t runtime_config_post_handler(httpd_req_t *req) {
     body[received] = '\0';
 
     char comm_mode_value[16] = {0};
+    char chassis_type_value[20] = {0};
     char agent_ip[16] = {0};
     char agent_port_value[8] = {0};
     extract_form_field(body, "comm_mode", comm_mode_value, sizeof(comm_mode_value));
+    extract_form_field(body, "chassis_type", chassis_type_value, sizeof(chassis_type_value));
     extract_form_field(body, "microros_agent_ip", agent_ip, sizeof(agent_ip));
     extract_form_field(body, "microros_agent_port", agent_port_value, sizeof(agent_port_value));
 
     WifiRuntimeConfig config = {};
     if (!parse_comm_mode(comm_mode_value, &config.comm_mode)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid comm mode");
+        return ESP_FAIL;
+    }
+    if (!parse_chassis_type(chassis_type_value, &config.chassis_type)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid chassis type");
         return ESP_FAIL;
     }
     if (!is_valid_ipv4_address(agent_ip)) {
@@ -1843,12 +1911,14 @@ static esp_err_t runtime_config_post_handler(httpd_req_t *req) {
     }
 
     g_wifi_comm_mode = config.comm_mode;
+    g_chassis_type = config.chassis_type;
     snprintf(g_microros_agent_ip, sizeof(g_microros_agent_ip), "%s",
              config.microros_agent_ip);
     g_microros_agent_port = config.microros_agent_port;
 
-    ESP_LOGI(TAG, "Saved runtime config: comm=%s, micro-ROS agent=%s:%u",
+    ESP_LOGI(TAG, "Saved runtime config: comm=%s, chassis=%s, micro-ROS agent=%s:%u",
              wifi_comm_mode_to_runtime_value(g_wifi_comm_mode),
+             chassis_type_to_runtime_value(g_chassis_type),
              g_microros_agent_ip,
              static_cast<unsigned>(g_microros_agent_port));
     httpd_resp_set_type(req, "application/json");
@@ -1875,8 +1945,17 @@ static int find_dns_question_end(const uint8_t *packet, int packet_len) {
 
 static void captive_dns_task(void *pvParameters) {
     esp_netif_ip_info_t ap_ip_info = {};
-    if (wifi_get_softap_ip_info(&ap_ip_info) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get SoftAP IP info for captive DNS");
+    esp_err_t ip_ret = ESP_ERR_INVALID_STATE;
+    for (int attempt = 0; attempt < kCaptiveDnsIpRetryCount; ++attempt) {
+        ip_ret = wifi_get_softap_ip_info(&ap_ip_info);
+        if (ip_ret == ESP_OK && ap_ip_info.ip.addr != 0) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(kCaptiveDnsIpRetryDelayMs));
+    }
+    if (ip_ret != ESP_OK || ap_ip_info.ip.addr == 0) {
+        ESP_LOGE(TAG, "Failed to get SoftAP IP info for captive DNS: %s",
+                 esp_err_to_name(ip_ret));
         vTaskDelete(NULL);
         return;
     }

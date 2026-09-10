@@ -200,9 +200,9 @@ void arm_task(void *p) {
     model.servo_zero_deg[2] = 90.0f;
     model.servo_zero_deg[3] = 90.0f;
     model.servo_dir[0] = 1.0f;
-    model.servo_dir[1] = -1.0f;
+    model.servo_dir[1] = 1.0f;
     model.servo_dir[2] = 1.0f;
-    model.servo_dir[3] = -1.0f;
+    model.servo_dir[3] = 1.0f;
     model.joint_min_deg[0] = 0.0f;
     model.joint_min_deg[1] = 0.0f;
     model.joint_min_deg[2] = 0.0f;
@@ -239,6 +239,7 @@ void arm_task(void *p) {
 
                 ArmJoints joints = {};
                 float target_servo_deg[kServoCount] = {};
+                copy_servo_angles(target_servo_deg, current_servo_deg);
                 if (kinematics.Inverse(target, &joints) &&
                     kinematics.JointsToServoDegrees(joints, target_servo_deg)) {
                     log_ik_solution(kinematics, target, joints, target_servo_deg);

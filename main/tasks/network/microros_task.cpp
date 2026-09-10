@@ -18,11 +18,13 @@
 #include "msg/motion_msg.h"
 #include "msg/servo_msg.h"
 #include "pid_config.h"
+#include "wifi_app.h"
 
 #include "geometry_msgs/msg/pose.h"
 #include "geometry_msgs/msg/vector3.h"
 #include "geometry_msgs/msg/twist.h"
 #include "leap_interfaces/srv/get_speed_pid.h"
+#include "leap_interfaces/srv/set_arm_pose.h"
 #include "leap_interfaces/srv/set_speed_pid.h"
 #include "nav_msgs/msg/odometry.h"
 #include "rcl/rcl.h"
@@ -40,6 +42,7 @@
 #include "rosidl_runtime_c/string_functions.h"
 #include "sensor_msgs/msg/imu.h"
 #include "sensor_msgs/msg/laser_scan.h"
+#include "std_msgs/msg/string.h"
 #include "uxr/client/profile/transport/custom/custom_transport.h"
 
 static const char *TAG = "MICROROS";
@@ -52,7 +55,16 @@ static constexpr gpio_num_t kMicroRosUartRxPin = GPIO_NUM_38;
 static constexpr int kMicroRosUartBaudRate = 460800;
 static constexpr size_t kMicroRosUartRxBufferSize = 4096;
 static constexpr size_t kMicroRosUartTxBufferSize = 4096;
-static constexpr int kMicroRosUartReadMaxWaitMs = 20;
+static constexpr int kMicroRosUartReadMaxWaitMs = 5;
+static constexpr int kMicroRosUartStartReadWaitMs = 100;
+static constexpr uint32_t kMicroRosUartStartLogPolls = 50;
+static constexpr char kMicroRosUartStartCommand[] = "MATURO_MICROROS_START";
+static constexpr size_t kHostInfoTextCapacity = 96;
+static constexpr size_t kWifiConfigTextCapacity = 256;
+static constexpr uint32_t kWifiConfigPublishTicks = 50;
+static constexpr uint32_t kHostInfoStartupTimeoutMs = 10000;
+static constexpr uint32_t kHostInfoHeartbeatTimeoutMs = 5000;
+static constexpr uint32_t kHostInfoTimeoutLogIntervalMs = 5000;
 
 #ifndef CONFIG_MICRO_ROS_LOCAL_PORT
 #define CONFIG_MICRO_ROS_LOCAL_PORT "8888"
@@ -71,9 +83,14 @@ struct UartTransportContext {
 static UdpTransportContext s_udp_ctx = {};
 static UartTransportContext s_uart_ctx = {};
 static bool s_uart_transport_initialized = false;
+static bool s_uart_start_received = false;
+static uint8_t s_uart_start_filter_pending[sizeof(kMicroRosUartStartCommand) - 1] = {};
+static size_t s_uart_start_filter_pending_len = 0;
+static bool s_uart_start_filter_drop_delimiter = false;
 static geometry_msgs__msg__Twist s_cmd_vel_msg = {};
 static geometry_msgs__msg__Vector3 s_servo_cmd_msg = {};
-static geometry_msgs__msg__Pose s_arm_pose_cmd_msg = {};
+static std_msgs__msg__String s_host_info_msg = {};
+static std_msgs__msg__String s_wifi_config_msg = {};
 static geometry_msgs__msg__Pose s_arm_pose_msg = {};
 static nav_msgs__msg__Odometry s_odom_msg = {};
 static sensor_msgs__msg__Imu s_imu_msg = {};
@@ -82,12 +99,16 @@ static rcl_publisher_t s_odom_publisher = {};
 static rcl_publisher_t s_imu_publisher = {};
 static rcl_publisher_t s_scan_publisher = {};
 static rcl_publisher_t s_arm_pose_publisher = {};
+static rcl_publisher_t s_wifi_config_publisher = {};
 static rcl_subscription_t s_cmd_vel_subscriber = {};
 static rcl_subscription_t s_servo_cmd_subscriber = {};
-static rcl_subscription_t s_arm_pose_cmd_subscriber = {};
+static rcl_subscription_t s_host_info_subscriber = {};
+static rcl_service_t s_set_arm_pose_service = {};
 static rcl_service_t s_set_speed_pid_service = {};
 static rcl_service_t s_get_speed_pid_service = {};
 static rclc_executor_t s_service_executor = {};
+static leap_interfaces__srv__SetArmPose_Request s_set_arm_pose_req = {};
+static leap_interfaces__srv__SetArmPose_Response s_set_arm_pose_res = {};
 static leap_interfaces__srv__SetSpeedPid_Request s_set_speed_pid_req = {};
 static leap_interfaces__srv__SetSpeedPid_Response s_set_speed_pid_res = {};
 static leap_interfaces__srv__GetSpeedPid_Request s_get_speed_pid_req = {};
@@ -109,9 +130,11 @@ static bool s_odom_publisher_initialized = false;
 static bool s_imu_publisher_initialized = false;
 static bool s_scan_publisher_initialized = false;
 static bool s_arm_pose_publisher_initialized = false;
+static bool s_wifi_config_publisher_initialized = false;
 static bool s_cmd_vel_subscriber_initialized = false;
 static bool s_servo_cmd_subscriber_initialized = false;
-static bool s_arm_pose_cmd_subscriber_initialized = false;
+static bool s_host_info_subscriber_initialized = false;
+static bool s_set_arm_pose_service_initialized = false;
 static bool s_set_speed_pid_service_initialized = false;
 static bool s_get_speed_pid_service_initialized = false;
 static bool s_service_executor_initialized = false;
@@ -119,6 +142,11 @@ static bool s_clock_initialized = false;
 static bool s_timer_initialized = false;
 static bool s_wait_set_initialized = false;
 static uint32_t s_publish_tick = 0;
+static uint32_t s_ros_session_start_ms = 0;
+static uint32_t s_last_host_info_timeout_log_ms = 0;
+static char s_host_info_data[kHostInfoTextCapacity] = {};
+static char s_wifi_config_data[kWifiConfigTextCapacity] = {};
+static char s_last_wifi_config_ssid[33] = {};
 
 #define RCCHECK(fn) do { \
     rcl_ret_t rc = (fn); \
@@ -198,8 +226,7 @@ extern "C" size_t transport_read_udp(
     return received > 0 ? static_cast<size_t>(received) : 0;
 }
 
-extern "C" bool transport_open_uart(uxrCustomTransport *transport) {
-    auto *ctx = static_cast<UartTransportContext *>(transport->args);
+static bool ensure_uart_driver_initialized(UartTransportContext *ctx) {
     if (ctx == nullptr) {
         return false;
     }
@@ -269,6 +296,11 @@ extern "C" bool transport_open_uart(uxrCustomTransport *transport) {
     return true;
 }
 
+extern "C" bool transport_open_uart(uxrCustomTransport *transport) {
+    auto *ctx = static_cast<UartTransportContext *>(transport->args);
+    return ensure_uart_driver_initialized(ctx);
+}
+
 extern "C" bool transport_close_uart(uxrCustomTransport *transport) {
     auto *ctx = static_cast<UartTransportContext *>(transport->args);
     if (ctx == nullptr) {
@@ -295,6 +327,53 @@ extern "C" size_t transport_write_uart(
     return written > 0 ? static_cast<size_t>(written) : 0;
 }
 
+static bool uart_start_filter_is_prefix(const uint8_t *bytes, size_t len) {
+    if (bytes == nullptr || len >= sizeof(kMicroRosUartStartCommand)) {
+        return false;
+    }
+    return memcmp(bytes, kMicroRosUartStartCommand, len) == 0;
+}
+
+static size_t filter_uart_start_command_bytes(uint8_t *buf, size_t len) {
+    if (buf == nullptr || len == 0) {
+        return 0;
+    }
+
+    size_t out_len = 0;
+    const size_t command_len = sizeof(kMicroRosUartStartCommand) - 1;
+    for (size_t i = 0; i < len; ++i) {
+        const uint8_t byte = buf[i];
+        if (s_uart_start_filter_drop_delimiter) {
+            if (byte == '\r' || byte == '\n') {
+                continue;
+            }
+            s_uart_start_filter_drop_delimiter = false;
+        }
+
+        s_uart_start_filter_pending[s_uart_start_filter_pending_len++] = byte;
+        while (s_uart_start_filter_pending_len > 0 &&
+               !uart_start_filter_is_prefix(
+                   s_uart_start_filter_pending,
+                   s_uart_start_filter_pending_len)) {
+            buf[out_len++] = s_uart_start_filter_pending[0];
+            --s_uart_start_filter_pending_len;
+            if (s_uart_start_filter_pending_len > 0) {
+                memmove(
+                    s_uart_start_filter_pending,
+                    s_uart_start_filter_pending + 1,
+                    s_uart_start_filter_pending_len);
+            }
+        }
+
+        if (s_uart_start_filter_pending_len == command_len) {
+            s_uart_start_filter_pending_len = 0;
+            s_uart_start_filter_drop_delimiter = true;
+        }
+    }
+
+    return out_len;
+}
+
 extern "C" size_t transport_read_uart(
     uxrCustomTransport *transport,
     uint8_t *buf,
@@ -310,7 +389,10 @@ extern "C" size_t transport_read_uart(
         (timeout > kMicroRosUartReadMaxWaitMs ? kMicroRosUartReadMaxWaitMs : timeout);
     const TickType_t ticks = pdMS_TO_TICKS(wait_ms);
     const int received = uart_read_bytes(ctx->port, buf, len, ticks);
-    return received > 0 ? static_cast<size_t>(received) : 0;
+    taskYIELD();
+    return received > 0
+        ? filter_uart_start_command_bytes(buf, static_cast<size_t>(received))
+        : 0;
 }
 
 static void cleanup_result(rcl_ret_t ret) {
@@ -324,9 +406,11 @@ static void reset_ros_handles() {
     s_imu_publisher = rcl_get_zero_initialized_publisher();
     s_scan_publisher = rcl_get_zero_initialized_publisher();
     s_arm_pose_publisher = rcl_get_zero_initialized_publisher();
+    s_wifi_config_publisher = rcl_get_zero_initialized_publisher();
     s_cmd_vel_subscriber = rcl_get_zero_initialized_subscription();
     s_servo_cmd_subscriber = rcl_get_zero_initialized_subscription();
-    s_arm_pose_cmd_subscriber = rcl_get_zero_initialized_subscription();
+    s_host_info_subscriber = rcl_get_zero_initialized_subscription();
+    s_set_arm_pose_service = rcl_get_zero_initialized_service();
     s_set_speed_pid_service = rcl_get_zero_initialized_service();
     s_get_speed_pid_service = rcl_get_zero_initialized_service();
     s_service_executor = rclc_executor_get_zero_initialized_executor();
@@ -336,6 +420,88 @@ static void reset_ros_handles() {
     s_publish_timer = rcl_get_zero_initialized_timer();
     s_wait_set = rcl_get_zero_initialized_wait_set();
     s_clock = {};
+}
+
+static void prepare_host_info_message_buffer() {
+    memset(s_host_info_data, 0, sizeof(s_host_info_data));
+    s_host_info_msg.data.data = s_host_info_data;
+    s_host_info_msg.data.size = 0;
+    s_host_info_msg.data.capacity = sizeof(s_host_info_data);
+}
+
+static void prepare_wifi_config_message_buffer() {
+    memset(s_wifi_config_data, 0, sizeof(s_wifi_config_data));
+    s_wifi_config_msg.data.data = s_wifi_config_data;
+    s_wifi_config_msg.data.size = 0;
+    s_wifi_config_msg.data.capacity = sizeof(s_wifi_config_data);
+    s_last_wifi_config_ssid[0] = '\0';
+}
+
+static bool append_char(char *out, size_t out_size, size_t *offset, char ch) {
+    if (out == nullptr || offset == nullptr || *offset + 1 >= out_size) {
+        return false;
+    }
+    out[(*offset)++] = ch;
+    out[*offset] = '\0';
+    return true;
+}
+
+static bool append_literal(char *out, size_t out_size, size_t *offset, const char *text) {
+    if (text == nullptr) {
+        return false;
+    }
+    while (*text != '\0') {
+        if (!append_char(out, out_size, offset, *text++)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool append_json_escaped(char *out, size_t out_size, size_t *offset, const char *text) {
+    if (text == nullptr) {
+        return false;
+    }
+    while (*text != '\0') {
+        const char ch = *text++;
+        if (ch == '"' || ch == '\\') {
+            if (!append_char(out, out_size, offset, '\\')) {
+                return false;
+            }
+        }
+        if (!append_char(out, out_size, offset, ch)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool build_wifi_config_payload(char *out, size_t out_size, char *ssid_out, size_t ssid_out_size) {
+    if (out == nullptr || out_size == 0 || ssid_out == nullptr || ssid_out_size == 0) {
+        return false;
+    }
+
+    char ssid[33] = {};
+    char password[65] = {};
+    if (wifi_load_sta_credentials_or_default(ssid, sizeof(ssid), password, sizeof(password)) != ESP_OK ||
+        ssid[0] == '\0') {
+        return false;
+    }
+
+    size_t offset = 0;
+    out[0] = '\0';
+    bool ok = append_literal(out, out_size, &offset, "{\"ssid\":\"");
+    ok = ok && append_json_escaped(out, out_size, &offset, ssid);
+    ok = ok && append_literal(out, out_size, &offset, "\",\"password\":\"");
+    ok = ok && append_json_escaped(out, out_size, &offset, password);
+    ok = ok && append_literal(out, out_size, &offset, "\"}");
+    if (!ok) {
+        out[0] = '\0';
+        return false;
+    }
+
+    snprintf(ssid_out, ssid_out_size, "%s", ssid);
+    return true;
 }
 
 static void handle_cmd_vel(const geometry_msgs__msg__Twist *msg) {
@@ -369,52 +535,161 @@ static void handle_servo_cmd_vector(const geometry_msgs__msg__Vector3 *msg) {
     xQueueOverwrite(q_servo_cmd, &servo_cmd);
 }
 
-static double normalized_pitch_from_pose(const geometry_msgs__msg__Pose *msg) {
-    const double x = msg->orientation.x;
-    const double y = msg->orientation.y;
-    const double z = msg->orientation.z;
-    const double w = msg->orientation.w;
-    if (x == 0.0 && y == 0.0 && z == 0.0 && w == 0.0) {
-        return 0.0;
+static void copy_host_info_field(
+    char *out,
+    size_t out_size,
+    const char *start,
+    size_t len) {
+    if (out == nullptr || out_size == 0) {
+        return;
     }
 
-    double sinp = 2.0 * (w * y - z * x);
-    if (sinp > 1.0) {
-        sinp = 1.0;
-    } else if (sinp < -1.0) {
-        sinp = -1.0;
+    const size_t copy_len = len < (out_size - 1) ? len : (out_size - 1);
+    if (copy_len > 0 && start != nullptr) {
+        memcpy(out, start, copy_len);
     }
-    return asin(sinp);
+    out[copy_len] = '\0';
 }
 
-static void handle_arm_pose_cmd(const geometry_msgs__msg__Pose *msg) {
-    if (msg == nullptr || q_arm_cmd == nullptr ||
-        !isfinite(msg->position.x) ||
-        !isfinite(msg->position.y) ||
-        !isfinite(msg->position.z) ||
-        !isfinite(msg->orientation.x) ||
-        !isfinite(msg->orientation.y) ||
-        !isfinite(msg->orientation.z) ||
-        !isfinite(msg->orientation.w)) {
+static bool extract_host_info_token(
+    const char *text,
+    const char *key,
+    char *out,
+    size_t out_size) {
+    if (text == nullptr || key == nullptr || out == nullptr || out_size == 0) {
+        return false;
+    }
+
+    const char *start = strstr(text, key);
+    if (start == nullptr) {
+        out[0] = '\0';
+        return false;
+    }
+    start += strlen(key);
+
+    const char *end = start;
+    while (*end != '\0' && *end != ' ' && *end != ',' && *end != ';') {
+        ++end;
+    }
+
+    copy_host_info_field(out, out_size, start, static_cast<size_t>(end - start));
+    return out[0] != '\0';
+}
+
+static void handle_host_info(const std_msgs__msg__String *msg) {
+    if (msg == nullptr || msg->data.data == nullptr || msg->data.size == 0) {
+        return;
+    }
+
+    char text[kHostInfoTextCapacity] = {};
+    const size_t text_len = msg->data.size < (sizeof(text) - 1)
+        ? msg->data.size
+        : (sizeof(text) - 1);
+    memcpy(text, msg->data.data, text_len);
+    text[text_len] = '\0';
+
+    char hostname[sizeof(g_target_host_info.hostname)] = {};
+    char hostip[sizeof(g_target_host_info.hostip)] = {};
+    const bool has_hostname =
+        extract_host_info_token(text, "hostname=", hostname, sizeof(hostname));
+    bool has_hostip =
+        extract_host_info_token(text, "hostip=", hostip, sizeof(hostip));
+    if (!has_hostip) {
+        has_hostip = extract_host_info_token(text, "ip=", hostip, sizeof(hostip));
+    }
+
+    if (!has_hostname || !has_hostip) {
+        ESP_LOGW(TAG, "Invalid host_info text: %s", text);
+        return;
+    }
+
+    g_target_host_info.valid = true;
+    g_target_host_info.last_update_ms =
+        static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    snprintf(g_target_host_info.hostname, sizeof(g_target_host_info.hostname), "%s", hostname);
+    snprintf(g_target_host_info.hostip, sizeof(g_target_host_info.hostip), "%s", hostip);
+    snprintf(g_target_host_info.text, sizeof(g_target_host_info.text), "%s", text);
+    ESP_LOGI(TAG, "Host info: hostname=%s hostip=%s",
+             g_target_host_info.hostname,
+             g_target_host_info.hostip);
+}
+
+static bool host_info_timed_out() {
+    if (g_wifi_comm_mode != WifiCommMode::kMicroRosUart || !s_ros_created) {
+        return false;
+    }
+
+    const uint32_t now_ms =
+        static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    const uint32_t last_update_ms =
+        g_target_host_info.valid ? g_target_host_info.last_update_ms : 0;
+    const uint32_t reference_ms =
+        last_update_ms != 0 ? last_update_ms : s_ros_session_start_ms;
+    const uint32_t timeout_ms =
+        last_update_ms != 0 ? kHostInfoHeartbeatTimeoutMs : kHostInfoStartupTimeoutMs;
+
+    if (reference_ms == 0 || static_cast<uint32_t>(now_ms - reference_ms) <= timeout_ms) {
+        return false;
+    }
+
+    if (s_last_host_info_timeout_log_ms == 0 ||
+        static_cast<uint32_t>(now_ms - s_last_host_info_timeout_log_ms) >=
+            kHostInfoTimeoutLogIntervalMs) {
+        ESP_LOGW(TAG, "host_info heartbeat timeout; waiting for Linux host start command");
+        s_last_host_info_timeout_log_ms = now_ms;
+    }
+    return true;
+}
+
+static void reset_host_info_state() {
+    g_target_host_info.valid = false;
+    g_target_host_info.last_update_ms = 0;
+    g_target_host_info.hostname[0] = '\0';
+    g_target_host_info.hostip[0] = '\0';
+    g_target_host_info.text[0] = '\0';
+}
+
+static void set_arm_pose_response(
+    leap_interfaces__srv__SetArmPose_Response *res,
+    bool success,
+    const ArmMsg &arm_msg) {
+    if (res == nullptr) {
+        return;
+    }
+    res->success = success;
+    res->x = arm_msg.x;
+    res->y = arm_msg.y;
+    res->z = arm_msg.z;
+    res->pitch_deg = arm_msg.pitch_deg;
+}
+
+static void handle_set_arm_pose_service(const void *req, void *res) {
+    auto *request = static_cast<const leap_interfaces__srv__SetArmPose_Request *>(req);
+    auto *response = static_cast<leap_interfaces__srv__SetArmPose_Response *>(res);
+    if (request == nullptr || response == nullptr || q_arm_cmd == nullptr ||
+        !isfinite(request->x) ||
+        !isfinite(request->y) ||
+        !isfinite(request->z) ||
+        !isfinite(request->pitch_deg)) {
+        ArmMsg empty = {};
+        set_arm_pose_response(response, false, empty);
         return;
     }
 
     ArmMsg arm_cmd = {};
     arm_cmd.mode = ARM_CMD_CARTESIAN;
     arm_cmd.valid = true;
-    arm_cmd.x = static_cast<float>(msg->position.x);
-    arm_cmd.y = static_cast<float>(msg->position.y);
-    arm_cmd.z = static_cast<float>(msg->position.z);
-    arm_cmd.pitch_deg = static_cast<float>(normalized_pitch_from_pose(msg) / kDegToRad);
-    ESP_LOGI(TAG, "arm_pose_cmd ros=(%.3f, %.3f, %.3f) ik=(%.3f, %.3f, %.3f) pitch=%.1f",
-             msg->position.x,
-             msg->position.y,
-             msg->position.z,
+    arm_cmd.x = request->x;
+    arm_cmd.y = request->y;
+    arm_cmd.z = request->z;
+    arm_cmd.pitch_deg = request->pitch_deg;
+    xQueueOverwrite(q_arm_cmd, &arm_cmd);
+    set_arm_pose_response(response, true, arm_cmd);
+    ESP_LOGI(TAG, "Arm pose service target: x=%.3f, y=%.3f, z=%.3f, pitch=%.1f",
              arm_cmd.x,
              arm_cmd.y,
              arm_cmd.z,
              arm_cmd.pitch_deg);
-    xQueueOverwrite(q_arm_cmd, &arm_cmd);
 }
 
 static void set_speed_pid_response(
@@ -475,7 +750,7 @@ static void handle_get_speed_pid_service(const void *, void *res) {
     get_speed_pid_response(response, true, g_speed_pid_state);
 }
 
-static void spin_pid_services() {
+static void spin_services() {
     if (s_service_executor_initialized) {
         RCSOFTCHECK(rclc_executor_spin_some(&s_service_executor, RCL_MS_TO_NS(0)));
     }
@@ -558,6 +833,30 @@ static void publish_arm_pose() {
     RCSOFTCHECK(rcl_publish(&s_arm_pose_publisher, &s_arm_pose_msg, nullptr));
 }
 
+static void publish_wifi_config() {
+    if (!s_wifi_config_publisher_initialized || s_wifi_config_msg.data.data == nullptr) {
+        return;
+    }
+
+    char ssid[33] = {};
+    if (!build_wifi_config_payload(
+            s_wifi_config_data,
+            sizeof(s_wifi_config_data),
+            ssid,
+            sizeof(ssid))) {
+        return;
+    }
+
+    s_wifi_config_msg.data.size = strlen(s_wifi_config_data);
+    s_wifi_config_msg.data.capacity = sizeof(s_wifi_config_data);
+    RCSOFTCHECK(rcl_publish(&s_wifi_config_publisher, &s_wifi_config_msg, nullptr));
+
+    if (strcmp(s_last_wifi_config_ssid, ssid) != 0) {
+        snprintf(s_last_wifi_config_ssid, sizeof(s_last_wifi_config_ssid), "%s", ssid);
+        ESP_LOGI(TAG, "Publishing wifi_config every 1s for SSID: %s", ssid);
+    }
+}
+
 static void publish_state_timer(rcl_timer_t *timer, int64_t) {
     if (timer == nullptr ||
         (g_wifi_comm_mode != WifiCommMode::kMicroRos &&
@@ -572,6 +871,9 @@ static void publish_state_timer(rcl_timer_t *timer, int64_t) {
 
     if ((++s_publish_tick % 5) == 0) {
         publish_scan(stamp_ms);
+    }
+    if ((s_publish_tick % kWifiConfigPublishTicks) == 0) {
+        publish_wifi_config();
     }
 }
 
@@ -611,9 +913,58 @@ static bool setup_uart_transport() {
     return true;
 }
 
+static bool wait_for_uart_start_command() {
+    memset(&s_uart_ctx, 0, sizeof(s_uart_ctx));
+    s_uart_ctx.port = kMicroRosUartPort;
+
+    if (!ensure_uart_driver_initialized(&s_uart_ctx)) {
+        return false;
+    }
+
+    ESP_LOGI(TAG, "micro-ROS UART waiting for host start command: %s",
+             kMicroRosUartStartCommand);
+
+    size_t matched = 0;
+    uint32_t polls = 0;
+    uint8_t bytes[64] = {};
+    const size_t command_len = strlen(kMicroRosUartStartCommand);
+
+    while (g_wifi_comm_mode == WifiCommMode::kMicroRosUart) {
+        const int received = uart_read_bytes(
+            kMicroRosUartPort,
+            bytes,
+            sizeof(bytes),
+            pdMS_TO_TICKS(kMicroRosUartStartReadWaitMs));
+
+        for (int i = 0; i < received; ++i) {
+            const char ch = static_cast<char>(bytes[i]);
+            if (ch == kMicroRosUartStartCommand[matched]) {
+                ++matched;
+                if (matched >= command_len) {
+                    s_uart_start_received = true;
+                    s_uart_start_filter_pending_len = 0;
+                    s_uart_start_filter_drop_delimiter = false;
+                    uart_flush_input(kMicroRosUartPort);
+                    ESP_LOGI(TAG, "micro-ROS UART start command received");
+                    return true;
+                }
+            } else {
+                matched = (ch == kMicroRosUartStartCommand[0]) ? 1 : 0;
+            }
+        }
+
+        if ((++polls % kMicroRosUartStartLogPolls) == 0) {
+            ESP_LOGI(TAG, "still waiting for micro-ROS UART host start command");
+        }
+    }
+
+    return false;
+}
+
 static bool create_ros_entities() {
     s_publish_tick = 0;
     reset_ros_handles();
+    reset_host_info_state();
 
     rosidl_runtime_c__String__init(&s_odom_msg.header.frame_id);
     rosidl_runtime_c__String__init(&s_odom_msg.child_frame_id);
@@ -675,16 +1026,15 @@ static bool create_ros_entities() {
     }
     s_node_initialized = true;
 
-    rcl_publisher_options_t pub_options = rcl_publisher_get_default_options();
-    rcl_publisher_options_t sensor_pub_options = rcl_publisher_get_default_options();
-    sensor_pub_options.qos = rmw_qos_profile_sensor_data;
+    rcl_publisher_options_t state_pub_options = rcl_publisher_get_default_options();
+    state_pub_options.qos = rmw_qos_profile_sensor_data;
     s_odom_publisher = rcl_get_zero_initialized_publisher();
     RCCHECK(rcl_publisher_init(
         &s_odom_publisher,
         &s_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
         "odom",
-        &pub_options));
+        &state_pub_options));
     s_odom_publisher_initialized = true;
 
     s_imu_publisher = rcl_get_zero_initialized_publisher();
@@ -693,7 +1043,7 @@ static bool create_ros_entities() {
         &s_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, Imu),
         "imu",
-        &sensor_pub_options));
+        &state_pub_options));
     s_imu_publisher_initialized = true;
 
     s_scan_publisher = rcl_get_zero_initialized_publisher();
@@ -702,7 +1052,7 @@ static bool create_ros_entities() {
         &s_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan),
         "scan",
-        &pub_options));
+        &state_pub_options));
     s_scan_publisher_initialized = true;
 
     s_arm_pose_publisher = rcl_get_zero_initialized_publisher();
@@ -711,8 +1061,20 @@ static bool create_ros_entities() {
         &s_node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Pose),
         "arm_pose",
-        &pub_options));
+        &state_pub_options));
     s_arm_pose_publisher_initialized = true;
+
+    prepare_wifi_config_message_buffer();
+    rcl_publisher_options_t wifi_config_pub_options = rcl_publisher_get_default_options();
+    wifi_config_pub_options.qos = rmw_qos_profile_sensor_data;
+    s_wifi_config_publisher = rcl_get_zero_initialized_publisher();
+    RCCHECK(rcl_publisher_init(
+        &s_wifi_config_publisher,
+        &s_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+        "wifi_config",
+        &wifi_config_pub_options));
+    s_wifi_config_publisher_initialized = true;
 
     rcl_subscription_options_t sub_options = rcl_subscription_get_default_options();
     sub_options.qos = rmw_qos_profile_sensor_data;
@@ -734,17 +1096,26 @@ static bool create_ros_entities() {
         &sub_options));
     s_servo_cmd_subscriber_initialized = true;
 
-    s_arm_pose_cmd_subscriber = rcl_get_zero_initialized_subscription();
+    prepare_host_info_message_buffer();
+    rcl_subscription_options_t host_info_sub_options = rcl_subscription_get_default_options();
     RCCHECK(rcl_subscription_init(
-        &s_arm_pose_cmd_subscriber,
+        &s_host_info_subscriber,
         &s_node,
-        ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Pose),
-        "arm_pose_cmd",
-        &sub_options));
-    s_arm_pose_cmd_subscriber_initialized = true;
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, String),
+        "host_info",
+        &host_info_sub_options));
+    s_host_info_subscriber_initialized = true;
 
     rcl_service_options_t service_options = rcl_service_get_default_options();
     service_options.qos = rmw_qos_profile_services_default;
+    RCCHECK(rcl_service_init(
+        &s_set_arm_pose_service,
+        &s_node,
+        ROSIDL_GET_SRV_TYPE_SUPPORT(leap_interfaces, srv, SetArmPose),
+        "set_arm_pose",
+        &service_options));
+    s_set_arm_pose_service_initialized = true;
+
     RCCHECK(rcl_service_init(
         &s_set_speed_pid_service,
         &s_node,
@@ -761,8 +1132,14 @@ static bool create_ros_entities() {
         &service_options));
     s_get_speed_pid_service_initialized = true;
 
-    RCCHECK(rclc_executor_init(&s_service_executor, &s_context, 2, &s_allocator));
+    RCCHECK(rclc_executor_init(&s_service_executor, &s_context, 3, &s_allocator));
     s_service_executor_initialized = true;
+    RCCHECK(rclc_executor_add_service(
+        &s_service_executor,
+        &s_set_arm_pose_service,
+        &s_set_arm_pose_req,
+        &s_set_arm_pose_res,
+        handle_set_arm_pose_service));
     RCCHECK(rclc_executor_add_service(
         &s_service_executor,
         &s_set_speed_pid_service,
@@ -793,6 +1170,9 @@ static bool create_ros_entities() {
     RCCHECK(rcl_wait_set_init(&s_wait_set, 3, 0, 1, 0, 0, 0, &s_context, s_allocator));
     s_wait_set_initialized = true;
     s_ros_created = true;
+    s_ros_session_start_ms =
+        static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
+    s_last_host_info_timeout_log_ms = 0;
     return true;
 }
 
@@ -832,6 +1212,10 @@ static void destroy_ros_entities() {
         cleanup_result(rcl_publisher_fini(&s_arm_pose_publisher, &s_node));
         s_arm_pose_publisher_initialized = false;
     }
+    if (s_wifi_config_publisher_initialized) {
+        cleanup_result(rcl_publisher_fini(&s_wifi_config_publisher, &s_node));
+        s_wifi_config_publisher_initialized = false;
+    }
     if (s_imu_publisher_initialized) {
         cleanup_result(rcl_publisher_fini(&s_imu_publisher, &s_node));
         s_imu_publisher_initialized = false;
@@ -848,13 +1232,17 @@ static void destroy_ros_entities() {
         cleanup_result(rcl_subscription_fini(&s_servo_cmd_subscriber, &s_node));
         s_servo_cmd_subscriber_initialized = false;
     }
-    if (s_arm_pose_cmd_subscriber_initialized) {
-        cleanup_result(rcl_subscription_fini(&s_arm_pose_cmd_subscriber, &s_node));
-        s_arm_pose_cmd_subscriber_initialized = false;
+    if (s_host_info_subscriber_initialized) {
+        cleanup_result(rcl_subscription_fini(&s_host_info_subscriber, &s_node));
+        s_host_info_subscriber_initialized = false;
     }
     if (s_service_executor_initialized) {
         cleanup_result(rclc_executor_fini(&s_service_executor));
         s_service_executor_initialized = false;
+    }
+    if (s_set_arm_pose_service_initialized) {
+        cleanup_result(rcl_service_fini(&s_set_arm_pose_service, &s_node));
+        s_set_arm_pose_service_initialized = false;
     }
     if (s_set_speed_pid_service_initialized) {
         cleanup_result(rcl_service_fini(&s_set_speed_pid_service, &s_node));
@@ -912,7 +1300,7 @@ static bool spin_once(int timeout_ms) {
         ESP_LOGW(TAG, "rcl_wait_set_add_subscription failed: %d", static_cast<int>(ret));
         return false;
     }
-    ret = rcl_wait_set_add_subscription(&s_wait_set, &s_arm_pose_cmd_subscriber, nullptr);
+    ret = rcl_wait_set_add_subscription(&s_wait_set, &s_host_info_subscriber, nullptr);
     if (ret != RCL_RET_OK) {
         ESP_LOGW(TAG, "rcl_wait_set_add_subscription failed: %d", static_cast<int>(ret));
         return false;
@@ -925,7 +1313,7 @@ static bool spin_once(int timeout_ms) {
 
     ret = rcl_wait(&s_wait_set, RCL_MS_TO_NS(timeout_ms));
     if (ret == RCL_RET_TIMEOUT) {
-        spin_pid_services();
+        spin_services();
         return true;
     }
     if (ret != RCL_RET_OK) {
@@ -952,9 +1340,9 @@ static bool spin_once(int timeout_ms) {
     }
 
     if (s_wait_set.subscriptions[2] != nullptr) {
-        const rcl_ret_t take_ret = rcl_take(&s_arm_pose_cmd_subscriber, &s_arm_pose_cmd_msg, nullptr, nullptr);
+        const rcl_ret_t take_ret = rcl_take(&s_host_info_subscriber, &s_host_info_msg, nullptr, nullptr);
         if (take_ret == RCL_RET_OK) {
-            handle_arm_pose_cmd(&s_arm_pose_cmd_msg);
+            handle_host_info(&s_host_info_msg);
         } else if (take_ret != RCL_RET_SUBSCRIPTION_TAKE_FAILED) {
             ESP_LOGW(TAG, "rcl_take failed: %d", static_cast<int>(take_ret));
         }
@@ -963,7 +1351,7 @@ static bool spin_once(int timeout_ms) {
     if (s_wait_set.timers[0] != nullptr) {
         RCSOFTCHECK(rcl_timer_call(&s_publish_timer));
     }
-    spin_pid_services();
+    spin_services();
     return true;
 }
 
@@ -975,16 +1363,20 @@ void microros_task(void *p) {
         const bool use_uart = g_wifi_comm_mode == WifiCommMode::kMicroRosUart;
         if (use_udp || use_uart) {
             if (!s_ros_created) {
+                if (use_uart && !s_uart_start_received && !wait_for_uart_start_command()) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    continue;
+                }
                 const bool transport_ready = use_uart ? setup_uart_transport() : setup_udp_transport();
                 if (transport_ready && create_ros_entities()) {
                     if (use_uart) {
-                        ESP_LOGI(TAG, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose, sub=/cmd_vel,/servo_cmd,/arm_pose_cmd, srv=/set_speed_pid,/get_speed_pid",
+                        ESP_LOGI(TAG, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose,/wifi_config, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
                                  static_cast<int>(kMicroRosUartPort),
                                  static_cast<int>(kMicroRosUartTxPin),
                                  static_cast<int>(kMicroRosUartRxPin),
                                  kMicroRosUartBaudRate);
                     } else {
-                        ESP_LOGI(TAG, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose, sub=/cmd_vel,/servo_cmd,/arm_pose_cmd, srv=/set_speed_pid,/get_speed_pid",
+                        ESP_LOGI(TAG, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose,/wifi_config, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
                                  g_microros_agent_ip,
                                  static_cast<unsigned>(g_microros_agent_port));
                     }
@@ -995,8 +1387,21 @@ void microros_task(void *p) {
                 }
             }
             if (!spin_once(20)) {
+                if (use_uart) {
+                    s_uart_start_received = false;
+                    reset_host_info_state();
+                    ESP_LOGW(TAG, "micro-ROS UART agent disconnected; waiting for Linux host start command");
+                }
                 destroy_ros_entities();
                 vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            if (use_uart && host_info_timed_out()) {
+                s_uart_start_received = false;
+                reset_host_info_state();
+                destroy_ros_entities();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
             }
         } else {
             if (s_ros_created) {

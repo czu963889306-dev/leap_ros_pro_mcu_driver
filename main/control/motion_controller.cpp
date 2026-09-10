@@ -91,6 +91,8 @@ void MotionController::ResetOdometry() {
 void MotionController::CalculateKinematics(float linear_x, float linear_y, float angular_z) {
   float v_mms[4] = {0};
   if (chassis_type_ == ChassisType::kMecanum) {
+    // X-pattern mecanum inverse kinematics. Wheel order: FL, FR, BL, BR.
+    // +x is forward, +y is left and +z is counter-clockwise.
     v_mms[0] = linear_x - linear_y - angular_z * (kLx + kLy);  // FL
     v_mms[1] = linear_x + linear_y + angular_z * (kLx + kLy);  // FR
     v_mms[2] = linear_x + linear_y - angular_z * (kLx + kLy);  // BL
@@ -131,7 +133,7 @@ void MotionController::Update(float dt, float current_imu_yaw_rad) {
 
   const float kAlpha = 0.35f;
   // 左侧电机/编码器与右侧是镜像安装，统一到“前进为正”的约定。
-  const int sign[4] = {-1, -1, -1, -1};
+  const int sign[4] = {1, 1, 1, 1};
 
   for (int i = 0; i < kNumWheels; ++i) {
     int32_t current_count = encs_[i]->GetCount() * sign[i];
@@ -212,6 +214,7 @@ void MotionController::GetVelocity(float* linear_x, float* linear_y, float* angu
   for (int i = 0; i < kNumWheels; ++i) v[i] = filtered_rpm_[i] * kRpmToMms;
 
   if (chassis_type_ == ChassisType::kMecanum) {
+    // X-pattern mecanum forward kinematics, inverse of CalculateKinematics().
     *linear_x = (v[0] + v[1] + v[2] + v[3]) / 4.0f;
     *linear_y = (-v[0] + v[1] + v[2] - v[3]) / 4.0f;
     *angular_z = (-v[0] + v[1] - v[2] + v[3]) / (4.0f * (kLx + kLy));

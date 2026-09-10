@@ -13,9 +13,6 @@ set(APP_SRCS
     "tasks/sensors/lidar_task.cpp"
     "tasks/io/peripheral_task.cpp"
     "tasks/io/gamepad_i2c_task.cpp"
-    "tasks/network/mavlink_common.cpp"
-    "tasks/network/mavlink_udp_task.cpp"
-    "tasks/network/mavlink_uart_task.cpp"
     "tasks/network/wifi_provision_task.cpp"
     "tasks/network/microros_task.cpp"
     "network/wifi_app.cpp"
@@ -33,7 +30,6 @@ idf_component_register(
         "network"
         "tasks/network"
         "../components/i2c_bus_lock"
-        "../components/mavlink_lib"
     REQUIRES
         esp_http_server
         esp_wifi
@@ -54,6 +50,5 @@ idf_component_register(
         status_led
         camera_i2c_client
         i2c_bus_lock
-        mavlink_lib
         micro_ros_espidf_component
 )

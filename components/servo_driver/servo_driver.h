@@ -6,6 +6,8 @@
 
 class ServoDriver {
  public:
+  // default_angle and SetAngle use the caller's calibrated command angle.
+  // When reversed is true, the physical PWM angle is mirrored as 180 - angle.
   ServoDriver(gpio_num_t pin, int group_id, float default_angle = 90.0f, bool reversed = false);
 
   bool Init();

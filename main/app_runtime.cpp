@@ -44,26 +44,6 @@ static void start_comm_task(void) {
         return;
     }
 
-    if (g_wifi_comm_mode == WifiCommMode::kMavlinkUdp) {
-        if (xTaskCreate(mavlink_udp_task, "mavlink_udp", 8192, NULL, 3, NULL) == pdPASS) {
-            s_comm_task_started = true;
-            ESP_LOGI(TAG, "MAVLink UDP task started");
-        } else {
-            ESP_LOGE(TAG, "Failed to start MAVLink UDP task");
-        }
-        return;
-    }
-
-    if (g_wifi_comm_mode == WifiCommMode::kMavlinkUart) {
-        if (xTaskCreate(mavlink_uart_task, "mavlink_uart", 8192, NULL, 3, NULL) == pdPASS) {
-            s_comm_task_started = true;
-            ESP_LOGI(TAG, "MAVLink UART task started");
-        } else {
-            ESP_LOGE(TAG, "Failed to start MAVLink UART task");
-        }
-        return;
-    }
-
     if (g_wifi_comm_mode != WifiCommMode::kMicroRos &&
         g_wifi_comm_mode != WifiCommMode::kMicroRosUart) {
         ESP_LOGW(TAG, "Unknown communication mode: %s",
@@ -87,11 +67,9 @@ static void wifi_start_task(void *p) {
     }
 
     xTaskCreate(wifi_provision_task, "wifi_provision", 6144, NULL, 3, NULL);
-    if (sta_connected && g_wifi_comm_mode != WifiCommMode::kMavlinkUart &&
-        g_wifi_comm_mode != WifiCommMode::kMicroRosUart) {
+    if (sta_connected && g_wifi_comm_mode != WifiCommMode::kMicroRosUart) {
         start_comm_task();
-    } else if (!sta_connected && g_wifi_comm_mode != WifiCommMode::kMavlinkUart &&
-               g_wifi_comm_mode != WifiCommMode::kMicroRosUart) {
+    } else if (!sta_connected && g_wifi_comm_mode != WifiCommMode::kMicroRosUart) {
         ESP_LOGW(TAG, "STA not connected; communication task is not started");
     }
 
@@ -123,12 +101,14 @@ static void init_runtime_config(void) {
     }
 
     g_wifi_comm_mode = config.comm_mode;
+    g_chassis_type = config.chassis_type;
     snprintf(g_microros_agent_ip, sizeof(g_microros_agent_ip), "%s",
              config.microros_agent_ip);
     g_microros_agent_port = config.microros_agent_port;
 
-    ESP_LOGI(TAG, "Runtime config: comm=%s, micro-ROS agent=%s:%u",
+    ESP_LOGI(TAG, "Runtime config: comm=%s, chassis=%s, micro-ROS agent=%s:%u",
              wifi_comm_mode_to_runtime_value(g_wifi_comm_mode),
+             chassis_type_to_runtime_value(g_chassis_type),
              g_microros_agent_ip,
              static_cast<unsigned>(g_microros_agent_port));
 }
@@ -198,8 +178,7 @@ void app_runtime_startup(void) {
     // xTaskCreate(ultrasonic_task, "ultrasonic", 4096, NULL, 4, NULL);
     xTaskCreate(peripheral_task, "peripheral", 4096, NULL, 3, NULL);
     xTaskCreate(lidar_task, "lidar", 8192, NULL, 4, NULL);
-    if (g_wifi_comm_mode == WifiCommMode::kMavlinkUart ||
-        g_wifi_comm_mode == WifiCommMode::kMicroRosUart) {
+    if (g_wifi_comm_mode == WifiCommMode::kMicroRosUart) {
         start_comm_task();
     }
     xTaskCreate(camera_task, "camera_task", 4096, NULL, 3, NULL);

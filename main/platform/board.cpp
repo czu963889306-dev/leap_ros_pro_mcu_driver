@@ -1,4 +1,5 @@
 #include "board.h"
+#include "system_globals.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -30,7 +31,9 @@ const gpio_num_t kServo2Pin = GPIO_NUM_35;
 const gpio_num_t kServo3Pin = GPIO_NUM_45;
 const gpio_num_t kServo4Pin = GPIO_NUM_48;
 const gpio_num_t kServo5Pin = GPIO_NUM_1;
-const float kServoStartupAngles[5] = {90.0f, 140.0f, 180.0f, 0.0f, 180.0f};
+// Arm servos 1..4 use the same angle convention as ArmKinematics servo_deg.
+// The claw servo is not part of IK.
+const float kServoStartupAngles[5] = {90.0f, 0.0f, 180.0f, 180.0f, 180.0f};
 const TickType_t kServoStartupDelayTicks = pdMS_TO_TICKS(2000);
 // GPIO0/BOOT is a strapping/download pin. Using it as a runtime button is risky,
 // but it is enabled here intentionally for the BOOT double-click action.
@@ -58,23 +61,28 @@ UltrasonicSensor ultrasonic(kUltrasonicPin);
 Ws2812Driver rgb_led(kRgbPin, 6);
 StatusLed status_led(kStatusLedPin);
 ButtonDriver io0_button(kIo0ButtonPin, true);
-ServoDriver servo_1(kServo1Pin, 0);
-ServoDriver servo_2(kServo2Pin, 0);
-ServoDriver servo_3(kServo3Pin, 1, 90.0f, true);
-ServoDriver servo_4(kServo4Pin, 1);
-ServoDriver servo_5(kServo5Pin, 1, kServoStartupAngles[4]);
+static constexpr bool kServo1Reversed = false;
+static constexpr bool kServo2Reversed = true;
+static constexpr bool kServo3Reversed = true;
+static constexpr bool kServo4Reversed = true;
+static constexpr bool kServo5Reversed = false;
 
-static constexpr ChassisType kDefaultChassisType = ChassisType::kDifferential;
+ServoDriver servo_1(kServo1Pin, 0, 90.0f, kServo1Reversed);
+ServoDriver servo_2(kServo2Pin, 0, 90.0f, kServo2Reversed);
+ServoDriver servo_3(kServo3Pin, 1, 90.0f, kServo3Reversed);
+ServoDriver servo_4(kServo4Pin, 1, 90.0f, kServo4Reversed);
+ServoDriver servo_5(kServo5Pin, 1, kServoStartupAngles[4], kServo5Reversed);
 
 // ================= 统一初始化逻辑 =================
 void board_init() {
     ESP_LOGI(TAG, "Initializing hardware...");
-    robot.SetChassisType(kDefaultChassisType);
+    robot.SetChassisType(g_chassis_type);
     motor_fl.Init(); encoder_fl.Init();
     motor_fr.Init(); encoder_fr.Init();
     motor_bl.Init(); encoder_bl.Init();
     motor_br.Init(); encoder_br.Init();
-    ESP_LOGI(TAG, "Front and rear wheels initialized for 4WD chassis.");
+    ESP_LOGI(TAG, "Front and rear wheels initialized for %s chassis.",
+             chassis_type_to_display_name(g_chassis_type));
 
     // 2. 初始化传感器和外设
     ultrasonic.Init();

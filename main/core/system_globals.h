@@ -7,26 +7,39 @@
 #include "freertos/queue.h"
 #include "msg/pid_msg.h"
 
+enum class ChassisType : uint8_t;
+
 enum class WifiCommMode : uint8_t {
-    kMavlinkUdp = 0,
     kMicroRos = 1,
-    kMavlinkUart = 2,
     kMicroRosUart = 3,
+};
+
+struct TargetHostInfo {
+    bool valid;
+    uint32_t last_update_ms;
+    char hostname[32];
+    char hostip[16];
+    char text[96];
 };
 
 bool wifi_comm_mode_is_valid(WifiCommMode mode);
 WifiCommMode wifi_comm_mode_next(WifiCommMode mode);
 const char *wifi_comm_mode_to_runtime_value(WifiCommMode mode);
 const char *wifi_comm_mode_to_display_name(WifiCommMode mode);
+bool chassis_type_is_valid(ChassisType type);
+const char *chassis_type_to_runtime_value(ChassisType type);
+const char *chassis_type_to_display_name(ChassisType type);
 
 // ================= 全局标志位 =================
 extern volatile bool g_emergency_stop;
 extern volatile bool g_motion_busy;
 extern volatile uint32_t g_lidar_scan_sequence;
 extern volatile WifiCommMode g_wifi_comm_mode;
+extern ChassisType g_chassis_type;
 extern char g_microros_agent_ip[16];
 extern uint16_t g_microros_agent_port;
 extern char g_device_name[32];
+extern TargetHostInfo g_target_host_info;
 
 // ================= 消息队列句柄 =================
 extern QueueHandle_t q_imu_state;
@@ -52,8 +65,6 @@ void arm_task(void *p);
 void imu_task(void *p);
 void ultrasonic_task(void *p);
 void peripheral_task(void *p);
-void mavlink_udp_task(void *pvParameters);
-void mavlink_uart_task(void *pvParameters);
 void lidar_task(void *p);
 void wifi_provision_task(void *pvParameters);
 void espnow_task(void *p); // <--- 新增 ESP-NOW 任务声明
