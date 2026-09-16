@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "arm_config.h"
 #include "arm_kinematics.h"
 #include "board.h"
 #include "esp_log.h"
@@ -11,12 +12,8 @@
 #include "msg/servo_msg.h"
 
 static const char *TAG = "ARM_TASK";
-static constexpr float kDegToRad = 0.017453292519943295f;
-static constexpr float kRadToDeg = 57.29577951308232f;
-static constexpr TickType_t kArmMoveDurationTicks = pdMS_TO_TICKS(1000);
-static constexpr float kAngleEpsilonDeg = 0.01f;
-static constexpr size_t kArmServoCount = 4;
-static constexpr size_t kServoCount = 5;
+namespace arm_cfg = leap_config::arm;
+static constexpr TickType_t kArmMoveDurationTicks = pdMS_TO_TICKS(arm_cfg::kArmMoveDurationMs);
 
 static ServoDriver *get_servo_by_index(size_t index) {
     switch (index) {
@@ -44,8 +41,8 @@ static bool set_servo_angle(size_t index, float angle_deg) {
     return true;
 }
 
-static void set_all_servo_angles(const float servo_deg[kServoCount]) {
-    for (size_t i = 0; i < kServoCount; ++i) {
+static void set_all_servo_angles(const float servo_deg[arm_cfg::kServoCount]) {
+    for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
         set_servo_angle(i, servo_deg[i]);
     }
 }
@@ -54,19 +51,19 @@ struct ServoMotionPlan {
     bool active = false;
     TickType_t start_tick = 0;
     TickType_t duration_ticks = kArmMoveDurationTicks;
-    float start_deg[kServoCount] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    float target_deg[kServoCount] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float start_deg[arm_cfg::kServoCount] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float target_deg[arm_cfg::kServoCount] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-static void copy_servo_angles(float dst[kServoCount], const float src[kServoCount]) {
-    for (size_t i = 0; i < kServoCount; ++i) {
+static void copy_servo_angles(float dst[arm_cfg::kServoCount], const float src[arm_cfg::kServoCount]) {
+    for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
         dst[i] = src[i];
     }
 }
 
-static bool servo_angles_close(const float lhs[kServoCount], const float rhs[kServoCount]) {
-    for (size_t i = 0; i < kServoCount; ++i) {
-        if (fabsf(lhs[i] - rhs[i]) > kAngleEpsilonDeg) {
+static bool servo_angles_close(const float lhs[arm_cfg::kServoCount], const float rhs[arm_cfg::kServoCount]) {
+    for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
+        if (fabsf(lhs[i] - rhs[i]) > arm_cfg::kAngleEpsilonDeg) {
             return false;
         }
     }
@@ -75,8 +72,8 @@ static bool servo_angles_close(const float lhs[kServoCount], const float rhs[kSe
 
 static void start_motion_plan(
     ServoMotionPlan *plan,
-    const float current_deg[kServoCount],
-    const float target_deg[kServoCount],
+    const float current_deg[arm_cfg::kServoCount],
+    const float target_deg[arm_cfg::kServoCount],
     TickType_t now_tick) {
     if (plan == nullptr) {
         return;
@@ -92,7 +89,7 @@ static void start_motion_plan(
 static bool update_motion_plan(
     ServoMotionPlan *plan,
     TickType_t now_tick,
-    float current_deg[kServoCount]) {
+    float current_deg[arm_cfg::kServoCount]) {
     if (plan == nullptr || !plan->active) {
         return false;
     }
@@ -115,16 +112,16 @@ static bool update_motion_plan(
 
 static void publish_arm_state(
     const ArmKinematics &kinematics,
-    const float servo_deg[kServoCount],
+    const float servo_deg[arm_cfg::kServoCount],
     bool valid) {
-    if (q_arm_state == nullptr) {
+    if (system_globals().queues.arm_state == nullptr) {
         return;
     }
 
     ArmMsg state = {};
     state.mode = ARM_CMD_JOINT_SERVO_DEG;
     state.valid = valid;
-    for (size_t i = 0; i < kArmServoCount; ++i) {
+    for (size_t i = 0; i < arm_cfg::kArmServoCount; ++i) {
         state.servo_deg[i] = servo_deg[i];
     }
 
@@ -133,20 +130,20 @@ static void publish_arm_state(
         state.x = pose.x;
         state.y = pose.y;
         state.z = pose.z;
-        state.pitch_deg = pose.alpha_rad / kDegToRad;
+        state.pitch_deg = pose.alpha_rad / arm_cfg::kDegToRad;
     } else {
         state.valid = false;
     }
-    xQueueOverwrite(q_arm_state, &state);
+    xQueueOverwrite(system_globals().queues.arm_state, &state);
 }
 
 static void log_ik_solution(
     const ArmKinematics &kinematics,
     const ArmPose &target,
     const ArmJoints &joints,
-    const float servo_deg[kArmServoCount]) {
+    const float servo_deg[arm_cfg::kArmServoCount]) {
     const float solved_alpha_deg =
-        (joints.shoulder_rad + joints.elbow_rad + joints.wrist_rad) * kRadToDeg;
+        (joints.shoulder_rad + joints.elbow_rad + joints.wrist_rad) * arm_cfg::kRadToDeg;
 
     ArmPose fk_pose = {};
     const bool fk_valid = kinematics.ForwardFromServoDegrees(servo_deg, &fk_pose);
@@ -160,10 +157,10 @@ static void log_ik_solution(
                  fk_pose.y,
                  fk_pose.z,
                  solved_alpha_deg,
-                 joints.base_rad * kRadToDeg,
-                 joints.shoulder_rad * kRadToDeg,
-                 joints.elbow_rad * kRadToDeg,
-                 joints.wrist_rad * kRadToDeg,
+                 joints.base_rad * arm_cfg::kRadToDeg,
+                 joints.shoulder_rad * arm_cfg::kRadToDeg,
+                 joints.elbow_rad * arm_cfg::kRadToDeg,
+                 joints.wrist_rad * arm_cfg::kRadToDeg,
                  servo_deg[0],
                  servo_deg[1],
                  servo_deg[2],
@@ -175,10 +172,10 @@ static void log_ik_solution(
                  target.y,
                  target.z,
                  solved_alpha_deg,
-                 joints.base_rad * kRadToDeg,
-                 joints.shoulder_rad * kRadToDeg,
-                 joints.elbow_rad * kRadToDeg,
-                 joints.wrist_rad * kRadToDeg,
+                 joints.base_rad * arm_cfg::kRadToDeg,
+                 joints.shoulder_rad * arm_cfg::kRadToDeg,
+                 joints.elbow_rad * arm_cfg::kRadToDeg,
+                 joints.wrist_rad * arm_cfg::kRadToDeg,
                  servo_deg[0],
                  servo_deg[1],
                  servo_deg[2],
@@ -190,30 +187,20 @@ void arm_task(void *p) {
     (void)p;
 
     ArmModel model = {};
-    model.a1_m = 0.200f;
-    model.a2_m = 0.105f;
-    model.a3_m = 0.105f;
-    model.a4_m = 0.180f;
-    model.p_m = 0.080f;
-    model.servo_zero_deg[0] = 0.0f;
-    model.servo_zero_deg[1] = 90.0f;
-    model.servo_zero_deg[2] = 90.0f;
-    model.servo_zero_deg[3] = 90.0f;
-    model.servo_dir[0] = 1.0f;
-    model.servo_dir[1] = 1.0f;
-    model.servo_dir[2] = 1.0f;
-    model.servo_dir[3] = 1.0f;
-    model.joint_min_deg[0] = 0.0f;
-    model.joint_min_deg[1] = 0.0f;
-    model.joint_min_deg[2] = 0.0f;
-    model.joint_min_deg[3] = 0.0f;
-    model.joint_max_deg[0] = 180.0f;
-    model.joint_max_deg[1] = 90.0f;
-    model.joint_max_deg[2] = 90.0f;
-    model.joint_max_deg[3] = 90.0f;
+    model.a1_m = arm_cfg::kLinkA1M;
+    model.a2_m = arm_cfg::kLinkA2M;
+    model.a3_m = arm_cfg::kLinkA3M;
+    model.a4_m = arm_cfg::kLinkA4M;
+    model.p_m = arm_cfg::kBaseOffsetM;
+    for (size_t i = 0; i < arm_cfg::kArmServoCount; ++i) {
+        model.servo_zero_deg[i] = arm_cfg::kServoZeroDeg[i];
+        model.servo_dir[i] = arm_cfg::kServoDir[i];
+        model.joint_min_deg[i] = arm_cfg::kJointMinDeg[i];
+        model.joint_max_deg[i] = arm_cfg::kJointMaxDeg[i];
+    }
 
     ArmKinematics kinematics(model);
-    float current_servo_deg[kServoCount] = {
+    float current_servo_deg[arm_cfg::kServoCount] = {
         kServoStartupAngles[0],
         kServoStartupAngles[1],
         kServoStartupAngles[2],
@@ -228,17 +215,17 @@ void arm_task(void *p) {
         bool state_changed = update_motion_plan(&motion_plan, now_tick, current_servo_deg);
 
         ArmMsg arm_cmd = {};
-        if (q_arm_cmd != nullptr && xQueueReceive(q_arm_cmd, &arm_cmd, 0) == pdTRUE) {
+        if (system_globals().queues.arm_cmd != nullptr && xQueueReceive(system_globals().queues.arm_cmd, &arm_cmd, 0) == pdTRUE) {
             if (arm_cmd.mode == ARM_CMD_CARTESIAN) {
                 ArmPose target = {};
                 target.x = arm_cmd.x;
                 target.y = arm_cmd.y;
                 target.z = arm_cmd.z;
-                target.alpha_rad = arm_cmd.pitch_deg * kDegToRad;
+                target.alpha_rad = arm_cmd.pitch_deg * arm_cfg::kDegToRad;
                 target.pitch_rad = target.alpha_rad;
 
                 ArmJoints joints = {};
-                float target_servo_deg[kServoCount] = {};
+                float target_servo_deg[arm_cfg::kServoCount] = {};
                 copy_servo_angles(target_servo_deg, current_servo_deg);
                 if (kinematics.Inverse(target, &joints) &&
                     kinematics.JointsToServoDegrees(joints, target_servo_deg)) {
@@ -257,9 +244,9 @@ void arm_task(void *p) {
                     publish_arm_state(kinematics, current_servo_deg, false);
                 }
             } else if (arm_cmd.mode == ARM_CMD_JOINT_SERVO_DEG) {
-                float target_servo_deg[kServoCount] = {};
+                float target_servo_deg[arm_cfg::kServoCount] = {};
                 copy_servo_angles(target_servo_deg, current_servo_deg);
-                for (size_t i = 0; i < kArmServoCount; ++i) {
+                for (size_t i = 0; i < arm_cfg::kArmServoCount; ++i) {
                     if (isfinite(arm_cmd.servo_deg[i])) {
                         target_servo_deg[i] = arm_cmd.servo_deg[i];
                     }
@@ -276,10 +263,10 @@ void arm_task(void *p) {
         }
 
         ServoMsg servo_cmd = {};
-        if (q_servo_cmd != nullptr && xQueueReceive(q_servo_cmd, &servo_cmd, 0) == pdTRUE) {
+        if (system_globals().queues.servo_cmd != nullptr && xQueueReceive(system_globals().queues.servo_cmd, &servo_cmd, 0) == pdTRUE) {
             if (servo_cmd.channel >= 1 && servo_cmd.channel <= 5 && isfinite(servo_cmd.angle)) {
                 const size_t index = static_cast<size_t>(servo_cmd.channel - 1);
-                float target_servo_deg[kServoCount] = {};
+                float target_servo_deg[arm_cfg::kServoCount] = {};
                 copy_servo_angles(target_servo_deg, current_servo_deg);
                 target_servo_deg[index] = servo_cmd.angle;
                 if (!servo_angles_close(current_servo_deg, target_servo_deg)) {

@@ -16,21 +16,21 @@ static const TickType_t kBootWifiResetLongPressTicks = pdMS_TO_TICKS(3000);
 static const TickType_t kTemperatureSampleTicks = pdMS_TO_TICKS(1000);
 
 static void toggle_wifi_comm_mode() {
-    g_wifi_comm_mode = wifi_comm_mode_next(g_wifi_comm_mode);
-    const esp_err_t err = wifi_save_comm_mode(static_cast<WifiCommMode>(g_wifi_comm_mode));
+    system_globals().runtime.wifi_comm_mode = SystemGlobals::NextWifiCommMode(system_globals().runtime.wifi_comm_mode);
+    const esp_err_t err = wifi_app().SaveCommMode(static_cast<WifiCommMode>(system_globals().runtime.wifi_comm_mode));
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to persist Wi-Fi communication mode: %s", esp_err_to_name(err));
     }
 
-    status_led.SetMode(g_wifi_comm_mode == WifiCommMode::kMicroRos
+    status_led.SetMode(system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRos
         ? StatusLedMode::kSlowBlink
         : StatusLedMode::kOn);
     ESP_LOGI(TAG, "Wi-Fi communication mode switched to %s",
-             wifi_comm_mode_to_display_name(g_wifi_comm_mode));
+             SystemGlobals::WifiCommModeToDisplayName(system_globals().runtime.wifi_comm_mode));
 }
 
 static bool clear_wifi_for_provisioning() {
-    const esp_err_t err = wifi_clear_sta_credentials();
+    const esp_err_t err = wifi_app().ClearStaCredentials();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to clear Wi-Fi credentials: %s", esp_err_to_name(err));
         return false;
@@ -62,7 +62,7 @@ static temperature_sensor_handle_t init_temperature_sensor() {
 }
 
 static void sample_temperature_sensor(temperature_sensor_handle_t sensor) {
-    if (sensor == nullptr || q_temperature_state == nullptr) {
+    if (sensor == nullptr || system_globals().queues.temperature_state == nullptr) {
         return;
     }
 
@@ -72,7 +72,7 @@ static void sample_temperature_sensor(temperature_sensor_handle_t sensor) {
     if (!msg.valid) {
         ESP_LOGW(TAG, "Failed to read internal temperature: %s", esp_err_to_name(err));
     }
-    xQueueOverwrite(q_temperature_state, &msg);
+    xQueueOverwrite(system_globals().queues.temperature_state, &msg);
 }
 
 void peripheral_task(void *p) {
@@ -84,7 +84,7 @@ void peripheral_task(void *p) {
 
     
     while (1) {
-        if (xQueueReceive(q_rgb_cmd, &rgb_cmd, 0) == pdTRUE) {
+        if (xQueueReceive(system_globals().queues.rgb_cmd, &rgb_cmd, 0) == pdTRUE) {
             for (int i = 0; i < 6; i++) {
                 rgb_led.SetPixel(i, rgb_cmd.r, rgb_cmd.g, rgb_cmd.b);
             }

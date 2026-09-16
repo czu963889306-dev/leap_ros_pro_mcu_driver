@@ -4,6 +4,8 @@ set(APP_SRCS
     "config/pid_config.cpp"
     "core/system_globals.cpp"
     "platform/board.cpp"
+    "control/differential_kinematics.cpp"
+    "control/mecanum_kinematics.cpp"
     "control/arm_kinematics.cpp"
     "control/motion_controller.cpp"
     "tasks/control/arm_task.cpp"
@@ -13,8 +15,15 @@ set(APP_SRCS
     "tasks/sensors/lidar_task.cpp"
     "tasks/io/peripheral_task.cpp"
     "tasks/io/gamepad_i2c_task.cpp"
-    "tasks/network/wifi_provision_task.cpp"
-    "tasks/network/microros_task.cpp"
+    "tasks/network/provision/wifi_provision_task.cpp"
+    "tasks/network/provision/provision_portal.cpp"
+    "tasks/network/microros/microros_state.cpp"
+    "tasks/network/microros/microros_transport.cpp"
+    "tasks/network/microros/microros_subscribers.cpp"
+    "tasks/network/microros/microros_services.cpp"
+    "tasks/network/microros/microros_publishers.cpp"
+    "tasks/network/microros/microros_runtime.cpp"
+    "tasks/network/microros/microros_task.cpp"
     "network/wifi_app.cpp"
 )
 
@@ -29,6 +38,8 @@ idf_component_register(
         "msg"
         "network"
         "tasks/network"
+        "tasks/network/microros"
+        "tasks/network/provision"
         "../components/i2c_bus_lock"
     REQUIRES
         esp_http_server

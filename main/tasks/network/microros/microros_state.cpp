@@ -1,0 +1,87 @@
+#include "microros_internal.h"
+
+namespace microros {
+
+const char *const kTag = "MICROROS";
+
+UdpTransportContext s_udp_ctx = {};
+UartTransportContext s_uart_ctx = {};
+bool s_uart_transport_initialized = false;
+bool s_uart_start_received = false;
+uint8_t s_uart_start_filter_pending[sizeof(net_cfg::kMicroRosUartStartCommand) - 1] = {};
+size_t s_uart_start_filter_pending_len = 0;
+bool s_uart_start_filter_drop_delimiter = false;
+
+geometry_msgs__msg__Twist s_cmd_vel_msg = {};
+geometry_msgs__msg__Vector3 s_servo_cmd_msg = {};
+std_msgs__msg__String s_host_info_msg = {};
+std_msgs__msg__String s_wifi_config_msg = {};
+geometry_msgs__msg__Pose s_arm_pose_msg = {};
+nav_msgs__msg__Odometry s_odom_msg = {};
+sensor_msgs__msg__Imu s_imu_msg = {};
+sensor_msgs__msg__LaserScan s_scan_msg = {};
+
+rcl_publisher_t s_odom_publisher = {};
+rcl_publisher_t s_imu_publisher = {};
+rcl_publisher_t s_scan_publisher = {};
+rcl_publisher_t s_arm_pose_publisher = {};
+rcl_publisher_t s_wifi_config_publisher = {};
+rcl_subscription_t s_cmd_vel_subscriber = {};
+rcl_subscription_t s_servo_cmd_subscriber = {};
+rcl_subscription_t s_host_info_subscriber = {};
+rcl_service_t s_set_arm_pose_service = {};
+rcl_service_t s_set_speed_pid_service = {};
+rcl_service_t s_get_speed_pid_service = {};
+rclc_executor_t s_service_executor = {};
+
+leap_interfaces__srv__SetArmPose_Request s_set_arm_pose_req = {};
+leap_interfaces__srv__SetArmPose_Response s_set_arm_pose_res = {};
+leap_interfaces__srv__SetSpeedPid_Request s_set_speed_pid_req = {};
+leap_interfaces__srv__SetSpeedPid_Response s_set_speed_pid_res = {};
+leap_interfaces__srv__GetSpeedPid_Request s_get_speed_pid_req = {};
+leap_interfaces__srv__GetSpeedPid_Response s_get_speed_pid_res = {};
+
+rcl_init_options_t s_init_options = {};
+rcl_context_t s_context = {};
+rcl_allocator_t s_allocator = {};
+rcl_node_t s_node = {};
+rcl_timer_t s_publish_timer = {};
+rcl_wait_set_t s_wait_set = {};
+rcl_clock_t s_clock = {};
+
+bool s_ros_created = false;
+bool s_strings_initialized = false;
+bool s_scan_ranges_initialized = false;
+bool s_init_options_initialized = false;
+bool s_context_initialized = false;
+bool s_node_initialized = false;
+bool s_odom_publisher_initialized = false;
+bool s_imu_publisher_initialized = false;
+bool s_scan_publisher_initialized = false;
+bool s_arm_pose_publisher_initialized = false;
+bool s_wifi_config_publisher_initialized = false;
+bool s_cmd_vel_subscriber_initialized = false;
+bool s_servo_cmd_subscriber_initialized = false;
+bool s_host_info_subscriber_initialized = false;
+bool s_set_arm_pose_service_initialized = false;
+bool s_set_speed_pid_service_initialized = false;
+bool s_get_speed_pid_service_initialized = false;
+bool s_service_executor_initialized = false;
+bool s_clock_initialized = false;
+bool s_timer_initialized = false;
+bool s_wait_set_initialized = false;
+
+uint32_t s_publish_tick = 0;
+uint32_t s_ros_session_start_ms = 0;
+uint32_t s_last_host_info_timeout_log_ms = 0;
+char s_host_info_data[ros_cfg::kHostInfoTextCapacity] = {};
+char s_wifi_config_data[ros_cfg::kWifiConfigTextCapacity] = {};
+char s_last_wifi_config_ssid[33] = {};
+
+void cleanup_result(rcl_ret_t ret) {
+    if (ret != RCL_RET_OK) {
+        ESP_LOGW(kTag, "cleanup status: %d", static_cast<int>(ret));
+    }
+}
+
+}  // namespace microros

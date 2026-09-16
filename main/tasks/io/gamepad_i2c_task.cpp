@@ -114,26 +114,26 @@ GamepadMsg MakeGamepadMsg(const GamepadData_t& frame, bool connected) {
 }
 
 void PublishDisconnected(void) {
-    if (q_gamepad_state == nullptr) {
+    if (system_globals().queues.gamepad_state == nullptr) {
         return;
     }
 
     GamepadMsg msg = {};
-    if (xQueuePeek(q_gamepad_state, &msg, 0) != pdTRUE) {
+    if (xQueuePeek(system_globals().queues.gamepad_state, &msg, 0) != pdTRUE) {
         msg = {};
     }
     msg.connected = 0;
     msg.update_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
-    xQueueOverwrite(q_gamepad_state, &msg);
+    xQueueOverwrite(system_globals().queues.gamepad_state, &msg);
 }
 
 void PublishGamepadState(const GamepadData_t& frame) {
-    if (q_gamepad_state == nullptr) {
+    if (system_globals().queues.gamepad_state == nullptr) {
         return;
     }
 
     const GamepadMsg msg = MakeGamepadMsg(frame, true);
-    xQueueOverwrite(q_gamepad_state, &msg);
+    xQueueOverwrite(system_globals().queues.gamepad_state, &msg);
 }
 
 void LogFrame(const GamepadData_t& frame) {

@@ -1,5 +1,6 @@
 #include "system_globals.h"
 #include "board.h"
+#include "motion_config.h"
 #include "msg/motion_msg.h"
 #include "msg/pid_msg.h"
 #include "msg/imu_msg.h"
@@ -7,9 +8,10 @@
 #include <cmath>
 
 static const char *TAG = "MOTION_TASK";
+namespace motion_cfg = leap_config::motion;
 
 void motion_task(void *p) {
-    const float dt = 0.02f;
+    const float dt = motion_cfg::kControlLoopDtS;
     MotionMsg cmd_msg = {};
     MotionMsg incoming_msg = {};
     MotionMsg status_msg = {};
@@ -19,10 +21,10 @@ void motion_task(void *p) {
     int current_mode = 0;
 
     while (1) {
-        xQueuePeek(q_imu_state, &imu_msg, 0);
+        xQueuePeek(system_globals().queues.imu_state, &imu_msg, 0);
 
         // 1. 接收底层运动指令 (指令状态机)
-        if (xQueueReceive(q_motion_cmd, &incoming_msg, 0) == pdTRUE) {
+        if (xQueueReceive(system_globals().queues.motion_cmd, &incoming_msg, 0) == pdTRUE) {
             cmd_msg = incoming_msg;
             current_mode = cmd_msg.control_mode;
 
@@ -50,18 +52,18 @@ void motion_task(void *p) {
         }
 
         // 2. 接收 PID 指令 (速度环)
-        if (xQueueReceive(q_speedpid_cmd, &speed_msg, 0) == pdTRUE) {
+        if (xQueueReceive(system_globals().queues.speedpid_cmd, &speed_msg, 0) == pdTRUE) {
             robot.SetVelocityPidGains(speed_msg.kp, speed_msg.ki, speed_msg.kd);
-            g_speed_pid_state = speed_msg;
+            system_globals().control.speed_pid = speed_msg;
             ESP_LOGI(TAG, "Speed PID updated: kp=%.3f, ki=%.3f, kd=%.3f",
                      speed_msg.kp, speed_msg.ki, speed_msg.kd);
         }
         
-        if (g_emergency_stop) {
+        if (system_globals().flags.emergency_stop) {
             robot.Stop();
-            g_motion_busy = false;
+            system_globals().flags.motion_busy = false;
         } else {
-            float imu_yaw_rad = imu_msg.yaw * (M_PI / 180.0f); 
+            float imu_yaw_rad = imu_msg.yaw * motion_cfg::kDegToRad; 
             robot.Update(dt, imu_yaw_rad);
         }
         
@@ -81,8 +83,8 @@ void motion_task(void *p) {
         status_msg.target_wx = cmd_msg.target_wx;
         status_msg.target_wz = cmd_msg.target_wz;
         
-        xQueueOverwrite(q_motion_state, &status_msg);
+        xQueueOverwrite(system_globals().queues.motion_state, &status_msg);
         
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(motion_cfg::kControlLoopPeriodMs));
     }
 }

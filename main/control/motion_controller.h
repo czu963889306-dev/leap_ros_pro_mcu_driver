@@ -4,6 +4,9 @@
 #include "motor_driver.h"
 #include "encoder_driver.h"
 #include "pid_controller.h"
+#include "differential_kinematics.h"
+#include "mecanum_kinematics.h"
+#include "motion_kinematics.h"
 
 enum class ControlMode { kVelocity, kDirectPwm };
 enum class ChassisType : uint8_t { kMecanum = 0, kDifferential = 1 };
@@ -42,6 +45,9 @@ class MotionController {
 
  private:
   void CalculateKinematics(float linear_x, float linear_y, float angular_z);
+  void SelectKinematics();
+  float WheelRpmToMmS(float wheel_rpm) const;
+  float MmSToWheelRpm(float speed_mms) const;
   static float NormalizeAngle(float angle);
 
   static constexpr int kNumWheels = 4;
@@ -56,6 +62,9 @@ class MotionController {
   float filtered_rpm_[kNumWheels] = {0};
   ControlMode control_mode_ = ControlMode::kVelocity;
   ChassisType chassis_type_ = ChassisType::kDifferential;
+  DifferentialKinematics differential_kinematics_;
+  MecanumKinematics mecanum_kinematics_;
+  const MotionKinematics* kinematics_ = &differential_kinematics_;
 
   float pos_x_ = 0.0f, pos_y_ = 0.0f, odom_yaw_ = 0.0f;
   float imu_yaw_rel_ = 0.0f;
@@ -63,7 +72,7 @@ class MotionController {
   float yaw_offset_ = 0.0f;
   bool need_reset_yaw_offset_ = true;
 
-  float max_accel_rpm_s_ = 200.0f; 
+  float max_accel_rpm_s_ = 200.0f;
 };
 
 #endif // MOTION_CONTROLLER_H_

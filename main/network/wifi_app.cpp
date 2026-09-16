@@ -9,44 +9,34 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "motion_controller.h"
+#include "network_config.h"
 #include "nvs.h"
 #include "system_globals.h"
 
 static const char *TAG = "WIFI_APP";
 static constexpr EventBits_t WIFI_CONNECTED_BIT = BIT0;
-static constexpr uint32_t kWifiConnectTimeoutMs = 15000;
-static const char *kWifiCfgNamespace = "wifi_cfg";
-static const char *kWifiCfgSsidKey = "sta_ssid";
-static const char *kWifiCfgPasswordKey = "sta_pass";
-static const char *kWifiCfgProvisionOnlyKey = "provision_only";
-static const char *kRuntimeCfgNamespace = "runtime_cfg";
-static const char *kRuntimeCfgCommModeKey = "comm_mode";
-static const char *kRuntimeCfgChassisTypeKey = "chassis";
-static const char *kRuntimeCfgMicroRosAgentIpKey = "uros_ip";
-static const char *kRuntimeCfgMicroRosAgentPortKey = "uros_port";
-static const char *kDefaultStaSsid = "Maturo";
-static const char *kDefaultStaPassword = "maturo2026";
-static const char *kDefaultMicroRosAgentIp = "192.168.31.214";
-static constexpr uint16_t kDefaultMicroRosAgentPort = 8888;
 static constexpr esp_err_t kProvisionOnlyCredentials = ESP_ERR_INVALID_STATE;
+namespace net_cfg = leap_config::network;
 
-static EventGroupHandle_t s_wifi_event_group = nullptr;
-static esp_netif_t *s_sta_netif = nullptr;
-static esp_netif_t *s_ap_netif = nullptr;
-static bool s_event_handlers_registered = false;
-static bool s_wifi_driver_initialized = false;
-static bool s_sta_auto_connect_enabled = false;
+WifiApp& WifiApp::Instance() {
+    static WifiApp instance;
+    return instance;
+}
 
-static esp_err_t load_saved_sta_credentials(char *ssid, size_t ssid_size,
-                                            char *password, size_t password_size) {
+WifiApp& wifi_app() {
+    return WifiApp::Instance();
+}
+
+esp_err_t WifiApp::LoadSavedStaCredentials(char *ssid, size_t ssid_size,
+                                           char *password, size_t password_size) {
     nvs_handle_t handle;
-    esp_err_t err = nvs_open(kWifiCfgNamespace, NVS_READONLY, &handle);
+    esp_err_t err = nvs_open(net_cfg::kWifiCfgNamespace, NVS_READONLY, &handle);
     if (err != ESP_OK) {
         return err;
     }
 
     uint8_t provision_only = 0;
-    err = nvs_get_u8(handle, kWifiCfgProvisionOnlyKey, &provision_only);
+    err = nvs_get_u8(handle, net_cfg::kWifiCfgProvisionOnlyKey, &provision_only);
     if (err == ESP_OK && provision_only != 0) {
         nvs_close(handle);
         return kProvisionOnlyCredentials;
@@ -58,9 +48,9 @@ static esp_err_t load_saved_sta_credentials(char *ssid, size_t ssid_size,
 
     size_t actual_ssid_size = ssid_size;
     size_t actual_password_size = password_size;
-    err = nvs_get_str(handle, kWifiCfgSsidKey, ssid, &actual_ssid_size);
+    err = nvs_get_str(handle, net_cfg::kWifiCfgSsidKey, ssid, &actual_ssid_size);
     if (err == ESP_OK) {
-        err = nvs_get_str(handle, kWifiCfgPasswordKey, password, &actual_password_size);
+        err = nvs_get_str(handle, net_cfg::kWifiCfgPasswordKey, password, &actual_password_size);
         if (err == ESP_ERR_NVS_NOT_FOUND) {
             password[0] = '\0';
             err = ESP_OK;
@@ -71,7 +61,7 @@ static esp_err_t load_saved_sta_credentials(char *ssid, size_t ssid_size,
     return err;
 }
 
-static void fill_sta_config(wifi_config_t *wifi_config, const char *ssid, const char *password) {
+void WifiApp::FillStaConfig(wifi_config_t *wifi_config, const char *ssid, const char *password) const {
     memset(wifi_config, 0, sizeof(*wifi_config));
     strncpy(reinterpret_cast<char *>(wifi_config->sta.ssid), ssid, sizeof(wifi_config->sta.ssid) - 1);
     strncpy(reinterpret_cast<char *>(wifi_config->sta.password), password, sizeof(wifi_config->sta.password) - 1);
@@ -79,7 +69,7 @@ static void fill_sta_config(wifi_config_t *wifi_config, const char *ssid, const 
         (password[0] == '\0') ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
 }
 
-esp_err_t wifi_load_sta_credentials_or_default(char *ssid, size_t ssid_size,
+esp_err_t WifiApp::LoadStaCredentialsOrDefault(char *ssid, size_t ssid_size,
                                                char *password, size_t password_size) {
     if (ssid == NULL || ssid_size == 0 || password == NULL || password_size == 0) {
         return ESP_ERR_INVALID_ARG;
@@ -87,7 +77,7 @@ esp_err_t wifi_load_sta_credentials_or_default(char *ssid, size_t ssid_size,
 
     ssid[0] = '\0';
     password[0] = '\0';
-    esp_err_t err = load_saved_sta_credentials(ssid, ssid_size, password, password_size);
+    esp_err_t err = LoadSavedStaCredentials(ssid, ssid_size, password, password_size);
     if (err == ESP_OK) {
         return ESP_OK;
     }
@@ -95,97 +85,104 @@ esp_err_t wifi_load_sta_credentials_or_default(char *ssid, size_t ssid_size,
         return err;
     }
 
-    strncpy(ssid, kDefaultStaSsid, ssid_size - 1);
+    strncpy(ssid, net_cfg::kDefaultStaSsid, ssid_size - 1);
     ssid[ssid_size - 1] = '\0';
-    strncpy(password, kDefaultStaPassword, password_size - 1);
+    strncpy(password, net_cfg::kDefaultStaPassword, password_size - 1);
     password[password_size - 1] = '\0';
     return ESP_OK;
 }
 
-void wifi_get_default_runtime_config(WifiRuntimeConfig *config) {
+void WifiApp::GetDefaultRuntimeConfig(WifiRuntimeConfig *config) const {
     if (config == NULL) {
         return;
     }
 
     config->comm_mode = WifiCommMode::kMicroRos;
     config->chassis_type = ChassisType::kMecanum;
-    strncpy(config->microros_agent_ip, kDefaultMicroRosAgentIp,
+    strncpy(config->microros_agent_ip, net_cfg::kDefaultMicroRosAgentIp,
             sizeof(config->microros_agent_ip) - 1);
     config->microros_agent_ip[sizeof(config->microros_agent_ip) - 1] = '\0';
-    config->microros_agent_port = kDefaultMicroRosAgentPort;
+    config->microros_agent_port = net_cfg::kDefaultMicroRosAgentPort;
 }
 
-static bool is_valid_runtime_config(const WifiRuntimeConfig *config) {
+bool WifiApp::IsValidRuntimeConfig(const WifiRuntimeConfig *config) const {
     if (config == NULL || config->microros_agent_ip[0] == '\0' ||
         config->microros_agent_port == 0) {
         return false;
     }
 
-    return wifi_comm_mode_is_valid(config->comm_mode) &&
-           chassis_type_is_valid(config->chassis_type);
+    return SystemGlobals::IsWifiCommModeValid(config->comm_mode) &&
+           SystemGlobals::IsChassisTypeValid(config->chassis_type);
 }
 
-static void ensure_wifi_stack_ready() {
-    static bool s_netif_initialized = false;
-    static bool s_event_loop_initialized = false;
-
-    if (!s_netif_initialized) {
+void WifiApp::EnsureWifiStackReady() {
+    if (!netif_initialized_) {
         esp_err_t err = esp_netif_init();
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_ERROR_CHECK(err);
         }
-        s_netif_initialized = true;
+        netif_initialized_ = true;
     }
 
-    if (!s_event_loop_initialized) {
+    if (!event_loop_initialized_) {
         esp_err_t err = esp_event_loop_create_default();
         if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
             ESP_ERROR_CHECK(err);
         }
-        s_event_loop_initialized = true;
+        event_loop_initialized_ = true;
     }
 
-    if (!s_wifi_driver_initialized) {
+    if (!wifi_driver_initialized_) {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-        s_wifi_driver_initialized = true;
+        wifi_driver_initialized_ = true;
     }
 
-    if (s_wifi_event_group == nullptr) {
-        s_wifi_event_group = xEventGroupCreate();
+    if (wifi_event_group_ == nullptr) {
+        wifi_event_group_ = xEventGroupCreate();
     }
 }
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data) {
+void WifiApp::StaticWifiEventHandler(
+    void *arg,
+    esp_event_base_t event_base,
+    int32_t event_id,
+    void *event_data) {
+    auto *app = static_cast<WifiApp *>(arg);
+    if (app != nullptr) {
+        app->HandleWifiEvent(event_base, event_id, event_data);
+    }
+}
+
+void WifiApp::HandleWifiEvent(esp_event_base_t event_base, int32_t event_id, void *event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        if (s_sta_auto_connect_enabled) {
+        if (sta_auto_connect_enabled_) {
             esp_wifi_connect();
         }
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_sta_auto_connect_enabled) {
+        if (sta_auto_connect_enabled_) {
             ESP_LOGW(TAG, "STA disconnected, retrying...");
             esp_wifi_connect();
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = static_cast<ip_event_got_ip_t *>(event_data);
         ESP_LOGI(TAG, "STA connected, got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        xEventGroupSetBits(wifi_event_group_, WIFI_CONNECTED_BIT);
     }
 }
 
-void wifi_init_softap(void) {
-    ensure_wifi_stack_ready();
-    s_sta_auto_connect_enabled = false;
+void WifiApp::InitSoftAp() {
+    EnsureWifiStackReady();
+    sta_auto_connect_enabled_ = false;
 
-    if (s_ap_netif == nullptr) {
-        s_ap_netif = esp_netif_create_default_wifi_ap();
+    if (ap_netif_ == nullptr) {
+        ap_netif_ = esp_netif_create_default_wifi_ap();
     }
 
     wifi_config_t wifi_config = {};
-    strncpy(reinterpret_cast<char *>(wifi_config.ap.ssid), g_device_name,
+    strncpy(reinterpret_cast<char *>(wifi_config.ap.ssid), system_globals().runtime.device_name,
             sizeof(wifi_config.ap.ssid) - 1);
-    wifi_config.ap.ssid_len = strlen(g_device_name);
+    wifi_config.ap.ssid_len = strlen(system_globals().runtime.device_name);
     wifi_config.ap.password[0] = 0;
     wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     wifi_config.ap.max_connection = 4;
@@ -200,39 +197,39 @@ void wifi_init_softap(void) {
     ESP_LOGW(TAG, "Provisioning AP started, SSID: %s", wifi_config.ap.ssid);
 }
 
-bool wifi_init_sta(void) {
-    ensure_wifi_stack_ready();
-    s_sta_auto_connect_enabled = true;
+bool WifiApp::InitSta() {
+    EnsureWifiStackReady();
+    sta_auto_connect_enabled_ = true;
 
-    if (s_sta_netif == nullptr) {
-        s_sta_netif = esp_netif_create_default_wifi_sta();
+    if (sta_netif_ == nullptr) {
+        sta_netif_ = esp_netif_create_default_wifi_sta();
     }
 
-    if (!s_event_handlers_registered) {
+    if (!event_handlers_registered_) {
         ESP_ERROR_CHECK(esp_event_handler_instance_register(
-            WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+            WIFI_EVENT, ESP_EVENT_ANY_ID, &WifiApp::StaticWifiEventHandler, this, NULL));
         ESP_ERROR_CHECK(esp_event_handler_instance_register(
-            IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
-        s_event_handlers_registered = true;
+            IP_EVENT, IP_EVENT_STA_GOT_IP, &WifiApp::StaticWifiEventHandler, this, NULL));
+        event_handlers_registered_ = true;
     }
 
     char ssid[33] = {0};
     char password[65] = {0};
-    esp_err_t creds_err = load_saved_sta_credentials(ssid, sizeof(ssid), password, sizeof(password));
+    esp_err_t creds_err = LoadSavedStaCredentials(ssid, sizeof(ssid), password, sizeof(password));
     if (creds_err == ESP_OK) {
         ESP_LOGI(TAG, "Using saved STA credentials for SSID: %s", ssid);
     } else if (creds_err == kProvisionOnlyCredentials) {
         ESP_LOGW(TAG, "Wi-Fi provisioning mode requested; skipping saved/default STA credentials.");
         return false;
     } else {
-        (void)wifi_load_sta_credentials_or_default(ssid, sizeof(ssid), password, sizeof(password));
+        (void)LoadStaCredentialsOrDefault(ssid, sizeof(ssid), password, sizeof(password));
         ESP_LOGW(TAG, "Saved STA credentials not found, trying default SSID: %s", ssid);
     }
 
     wifi_config_t wifi_config = {};
-    fill_sta_config(&wifi_config, ssid, password);
+    FillStaConfig(&wifi_config, ssid, password);
 
-    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    xEventGroupClearBits(wifi_event_group_, WIFI_CONNECTED_BIT);
     esp_wifi_stop();
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -241,11 +238,11 @@ bool wifi_init_sta(void) {
 
     ESP_LOGI(TAG, "Waiting for STA connection...");
     const EventBits_t bits = xEventGroupWaitBits(
-        s_wifi_event_group,
+        wifi_event_group_,
         WIFI_CONNECTED_BIT,
         pdFALSE,
         pdFALSE,
-        pdMS_TO_TICKS(kWifiConnectTimeoutMs));
+        pdMS_TO_TICKS(net_cfg::kWifiConnectTimeoutMs));
 
     if ((bits & WIFI_CONNECTED_BIT) != 0) {
         ESP_LOGI(TAG, "STA connection established.");
@@ -253,14 +250,14 @@ bool wifi_init_sta(void) {
     }
 
     ESP_LOGW(TAG, "STA connect timeout after %lu ms.",
-             static_cast<unsigned long>(kWifiConnectTimeoutMs));
+             static_cast<unsigned long>(net_cfg::kWifiConnectTimeoutMs));
     esp_wifi_disconnect();
     ESP_ERROR_CHECK(esp_wifi_stop());
     return false;
 }
 
-void wifi_init_espnow() {
-    ensure_wifi_stack_ready();
+void WifiApp::InitEspNow() {
+    EnsureWifiStackReady();
 
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -268,23 +265,23 @@ void wifi_init_espnow() {
     ESP_ERROR_CHECK(esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE));
 }
 
-esp_err_t wifi_save_sta_credentials(const char *ssid, const char *password) {
+esp_err_t WifiApp::SaveStaCredentials(const char *ssid, const char *password) {
     if (ssid == NULL || ssid[0] == '\0' || password == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
     nvs_handle_t handle;
-    esp_err_t err = nvs_open(kWifiCfgNamespace, NVS_READWRITE, &handle);
+    esp_err_t err = nvs_open(net_cfg::kWifiCfgNamespace, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
         return err;
     }
 
-    err = nvs_set_str(handle, kWifiCfgSsidKey, ssid);
+    err = nvs_set_str(handle, net_cfg::kWifiCfgSsidKey, ssid);
     if (err == ESP_OK) {
-        err = nvs_set_str(handle, kWifiCfgPasswordKey, password);
+        err = nvs_set_str(handle, net_cfg::kWifiCfgPasswordKey, password);
     }
     if (err == ESP_OK) {
-        err = nvs_erase_key(handle, kWifiCfgProvisionOnlyKey);
+        err = nvs_erase_key(handle, net_cfg::kWifiCfgProvisionOnlyKey);
         if (err == ESP_ERR_NVS_NOT_FOUND) {
             err = ESP_OK;
         }
@@ -297,27 +294,27 @@ esp_err_t wifi_save_sta_credentials(const char *ssid, const char *password) {
     return err;
 }
 
-esp_err_t wifi_clear_sta_credentials(void) {
-    s_sta_auto_connect_enabled = false;
+esp_err_t WifiApp::ClearStaCredentials() {
+    sta_auto_connect_enabled_ = false;
 
     nvs_handle_t handle;
-    esp_err_t err = nvs_open(kWifiCfgNamespace, NVS_READWRITE, &handle);
+    esp_err_t err = nvs_open(net_cfg::kWifiCfgNamespace, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
         return err;
     }
 
-    esp_err_t op_err = nvs_erase_key(handle, kWifiCfgSsidKey);
+    esp_err_t op_err = nvs_erase_key(handle, net_cfg::kWifiCfgSsidKey);
     if (op_err != ESP_OK && op_err != ESP_ERR_NVS_NOT_FOUND) {
         err = op_err;
     }
 
-    op_err = nvs_erase_key(handle, kWifiCfgPasswordKey);
+    op_err = nvs_erase_key(handle, net_cfg::kWifiCfgPasswordKey);
     if (op_err != ESP_OK && op_err != ESP_ERR_NVS_NOT_FOUND) {
         err = op_err;
     }
 
     if (err == ESP_OK) {
-        err = nvs_set_u8(handle, kWifiCfgProvisionOnlyKey, 1);
+        err = nvs_set_u8(handle, net_cfg::kWifiCfgProvisionOnlyKey, 1);
     }
     if (err == ESP_OK) {
         err = nvs_commit(handle);
@@ -336,24 +333,24 @@ esp_err_t wifi_clear_sta_credentials(void) {
     return err;
 }
 
-esp_err_t wifi_load_runtime_config(WifiRuntimeConfig *config) {
+esp_err_t WifiApp::LoadRuntimeConfig(WifiRuntimeConfig *config) {
     if (config == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    wifi_get_default_runtime_config(config);
+    GetDefaultRuntimeConfig(config);
 
     nvs_handle_t handle;
-    esp_err_t err = nvs_open(kRuntimeCfgNamespace, NVS_READONLY, &handle);
+    esp_err_t err = nvs_open(net_cfg::kRuntimeCfgNamespace, NVS_READONLY, &handle);
     if (err != ESP_OK) {
         return err;
     }
 
     uint8_t comm_mode = static_cast<uint8_t>(config->comm_mode);
-    esp_err_t read_err = nvs_get_u8(handle, kRuntimeCfgCommModeKey, &comm_mode);
+    esp_err_t read_err = nvs_get_u8(handle, net_cfg::kRuntimeCfgCommModeKey, &comm_mode);
     if (read_err == ESP_OK) {
         const WifiCommMode saved_mode = static_cast<WifiCommMode>(comm_mode);
-        if (wifi_comm_mode_is_valid(saved_mode)) {
+        if (SystemGlobals::IsWifiCommModeValid(saved_mode)) {
             config->comm_mode = saved_mode;
         }
     } else if (read_err != ESP_ERR_NVS_NOT_FOUND) {
@@ -361,10 +358,10 @@ esp_err_t wifi_load_runtime_config(WifiRuntimeConfig *config) {
     }
 
     uint8_t chassis_type = static_cast<uint8_t>(config->chassis_type);
-    read_err = nvs_get_u8(handle, kRuntimeCfgChassisTypeKey, &chassis_type);
+    read_err = nvs_get_u8(handle, net_cfg::kRuntimeCfgChassisTypeKey, &chassis_type);
     if (read_err == ESP_OK) {
         const ChassisType saved_type = static_cast<ChassisType>(chassis_type);
-        if (chassis_type_is_valid(saved_type)) {
+        if (SystemGlobals::IsChassisTypeValid(saved_type)) {
             config->chassis_type = saved_type;
         }
     } else if (read_err != ESP_ERR_NVS_NOT_FOUND) {
@@ -372,14 +369,14 @@ esp_err_t wifi_load_runtime_config(WifiRuntimeConfig *config) {
     }
 
     size_t ip_len = sizeof(config->microros_agent_ip);
-    read_err = nvs_get_str(handle, kRuntimeCfgMicroRosAgentIpKey,
+    read_err = nvs_get_str(handle, net_cfg::kRuntimeCfgMicroRosAgentIpKey,
                            config->microros_agent_ip, &ip_len);
     if (read_err != ESP_OK && read_err != ESP_ERR_NVS_NOT_FOUND) {
         err = read_err;
     }
 
     uint16_t port = config->microros_agent_port;
-    read_err = nvs_get_u16(handle, kRuntimeCfgMicroRosAgentPortKey, &port);
+    read_err = nvs_get_u16(handle, net_cfg::kRuntimeCfgMicroRosAgentPortKey, &port);
     if (read_err == ESP_OK) {
         config->microros_agent_port = port;
     } else if (read_err != ESP_ERR_NVS_NOT_FOUND) {
@@ -388,36 +385,36 @@ esp_err_t wifi_load_runtime_config(WifiRuntimeConfig *config) {
 
     nvs_close(handle);
 
-    if (!is_valid_runtime_config(config)) {
-        wifi_get_default_runtime_config(config);
+    if (!IsValidRuntimeConfig(config)) {
+        GetDefaultRuntimeConfig(config);
         return ESP_ERR_INVALID_ARG;
     }
     return err;
 }
 
-esp_err_t wifi_save_runtime_config(const WifiRuntimeConfig *config) {
-    if (!is_valid_runtime_config(config)) {
+esp_err_t WifiApp::SaveRuntimeConfig(const WifiRuntimeConfig *config) {
+    if (!IsValidRuntimeConfig(config)) {
         return ESP_ERR_INVALID_ARG;
     }
 
     nvs_handle_t handle;
-    esp_err_t err = nvs_open(kRuntimeCfgNamespace, NVS_READWRITE, &handle);
+    esp_err_t err = nvs_open(net_cfg::kRuntimeCfgNamespace, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
         return err;
     }
 
-    err = nvs_set_u8(handle, kRuntimeCfgCommModeKey,
+    err = nvs_set_u8(handle, net_cfg::kRuntimeCfgCommModeKey,
                      static_cast<uint8_t>(config->comm_mode));
     if (err == ESP_OK) {
-        err = nvs_set_u8(handle, kRuntimeCfgChassisTypeKey,
+        err = nvs_set_u8(handle, net_cfg::kRuntimeCfgChassisTypeKey,
                          static_cast<uint8_t>(config->chassis_type));
     }
     if (err == ESP_OK) {
-        err = nvs_set_str(handle, kRuntimeCfgMicroRosAgentIpKey,
+        err = nvs_set_str(handle, net_cfg::kRuntimeCfgMicroRosAgentIpKey,
                           config->microros_agent_ip);
     }
     if (err == ESP_OK) {
-        err = nvs_set_u16(handle, kRuntimeCfgMicroRosAgentPortKey,
+        err = nvs_set_u16(handle, net_cfg::kRuntimeCfgMicroRosAgentPortKey,
                           config->microros_agent_port);
     }
     if (err == ESP_OK) {
@@ -428,16 +425,16 @@ esp_err_t wifi_save_runtime_config(const WifiRuntimeConfig *config) {
     return err;
 }
 
-esp_err_t wifi_save_comm_mode(WifiCommMode mode) {
+esp_err_t WifiApp::SaveCommMode(WifiCommMode mode) {
     WifiRuntimeConfig config = {};
-    (void)wifi_load_runtime_config(&config);
+    (void)LoadRuntimeConfig(&config);
     config.comm_mode = mode;
-    return wifi_save_runtime_config(&config);
+    return SaveRuntimeConfig(&config);
 }
 
-esp_err_t wifi_get_softap_ip_info(esp_netif_ip_info_t *ip_info) {
-    if (ip_info == NULL || s_ap_netif == nullptr) {
+esp_err_t WifiApp::GetSoftApIpInfo(esp_netif_ip_info_t *ip_info) const {
+    if (ip_info == NULL || ap_netif_ == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
-    return esp_netif_get_ip_info(s_ap_netif, ip_info);
+    return esp_netif_get_ip_info(ap_netif_, ip_info);
 }

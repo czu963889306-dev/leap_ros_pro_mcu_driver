@@ -53,7 +53,7 @@ Geometry:
 
 | Item | Value |
 | --- | --- |
-| Wheel diameter | `65 mm` |
+| Wheel diameter | `80 mm` |
 | Wheelbase | `175 mm` |
 | Track width | `170 mm` |
 | Motor reduction ratio | `46.8:1` |
@@ -87,7 +87,7 @@ effective differential track width is `340 mm`.
 
 | Item | Value |
 | --- | --- |
-| Node name | `leap_low_driver` |
+| Node name | `leap_ros_pro` |
 | UDP local port | `CONFIG_MICRO_ROS_LOCAL_PORT`, default `8888` |
 | Timer period | 20 ms |
 
