@@ -25,11 +25,12 @@ struct TargetHostInfo {
 struct SystemFlags {
     volatile bool emergency_stop = false;
     volatile bool motion_busy = false;
+    volatile bool gamepad_override_active = false;
     volatile uint32_t lidar_scan_sequence = 0;
 };
 
 struct RuntimeSettings {
-    volatile WifiCommMode wifi_comm_mode = WifiCommMode::kMicroRos;
+    volatile WifiCommMode wifi_comm_mode = WifiCommMode::kMicroRosUart;
     ChassisType chassis_type;
     char microros_agent_ip[16] = {};
     uint16_t microros_agent_port = 0;
@@ -46,6 +47,7 @@ struct AppQueues {
     QueueHandle_t temperature_state = nullptr;
 
     QueueHandle_t motion_cmd = nullptr;
+    QueueHandle_t gamepad_motion_cmd = nullptr;
     QueueHandle_t rgb_cmd = nullptr;
     QueueHandle_t servo_cmd = nullptr;
     QueueHandle_t arm_cmd = nullptr;

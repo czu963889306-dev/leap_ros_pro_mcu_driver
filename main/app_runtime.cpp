@@ -137,6 +137,7 @@ static void create_runtime_queues(void) {
     system_globals().queues.gamepad_state = xQueueCreate(1, sizeof(GamepadMsg));
     system_globals().queues.temperature_state = xQueueCreate(1, sizeof(TemperatureMsg));
     system_globals().queues.motion_cmd = xQueueCreate(1, sizeof(MotionMsg));
+    system_globals().queues.gamepad_motion_cmd = xQueueCreate(1, sizeof(MotionMsg));
     system_globals().queues.rgb_cmd = xQueueCreate(1, sizeof(RgbMsg));
     system_globals().queues.servo_cmd = xQueueCreate(1, sizeof(ServoMsg));
     system_globals().queues.arm_cmd = xQueueCreate(1, sizeof(ArmMsg));
@@ -177,6 +178,9 @@ void app_runtime_startup(void) {
     xTaskCreate(arm_task, "arm", 4096, NULL, 4, NULL);
     // xTaskCreate(ultrasonic_task, "ultrasonic", 4096, NULL, 4, NULL);
     xTaskCreate(peripheral_task, "peripheral", 4096, NULL, 3, NULL);
+    if (xTaskCreate(gamepad_i2c_task, "gamepad_i2c", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start gamepad I2C task");
+    }
     xTaskCreate(lidar_task, "lidar", 8192, NULL, 4, NULL);
     if (system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRosUart) {
         start_comm_task();

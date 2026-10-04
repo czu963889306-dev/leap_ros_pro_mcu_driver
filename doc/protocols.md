@@ -9,15 +9,15 @@ The firmware supports two micro-ROS transports:
 
 | Mode | Runtime value | Default |
 | --- | --- | --- |
-| micro-ROS UDP | `micro_ros` | yes |
-| micro-ROS UART | `microros_uart` | no |
+| micro-ROS UDP | `micro_ros` | no |
+| micro-ROS UART | `microros_uart` | yes |
 
 The mode is stored in NVS and can be changed from the web configuration page or
 with a short BOOT-button press. Unsupported saved mode values are rejected and the
-firmware falls back to the default micro-ROS UDP configuration.
+firmware falls back to the default micro-ROS UART configuration.
 
 UDP uses the runtime agent address, default `192.168.31.214:8888`. UART uses
-UART2, GPIO37 TX, GPIO38 RX, 460800 baud, 8N1, without hardware flow control.
+UART2, GPIO37 TX, GPIO38 RX, 921600 baud, 8N1, without hardware flow control.
 In UART mode, the firmware keeps the UART silent until it receives the host
 start command `MATURO_MICROROS_START` on UART2. The AML host sends this command
 after Linux has booted, then starts the micro-ROS agent.
@@ -101,6 +101,24 @@ effective differential track width is `340 mm`.
 
 Receiving `/cmd_vel` writes velocity mode to `q_motion_cmd` and clears the
 emergency stop.
+
+### I2C Gamepad Control
+
+The firmware polls the I2C gamepad at address `0x50` at 20 Hz. Valid stick
+input is placed in a separate manual-override command path with the same
+velocity units as `/cmd_vel`; it does not overwrite the navigation command.
+
+| Gamepad input | Motion command | Maximum |
+| --- | --- | --- |
+| Left stick forward/back channel | `linear.x` | `300 mm/s` (`0.3 m/s`) |
+| Right stick turn channel | `angular.z` | `2.5 rad/s` |
+
+The raw stick range is `-127..127` with a dead zone of 12. A non-zero stick
+acts as a manual override and is published at 20 Hz. When the sticks return to
+the dead zone, the firmware only clears the manual-override flag; it does not
+send a zero `/cmd_vel`. The most recent navigation command resumes immediately.
+A disconnect or invalid frame also clears the override without overwriting the
+navigation command.
 
 ### Published Topics
 

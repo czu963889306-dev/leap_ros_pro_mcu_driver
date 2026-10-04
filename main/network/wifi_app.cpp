@@ -97,7 +97,7 @@ void WifiApp::GetDefaultRuntimeConfig(WifiRuntimeConfig *config) const {
         return;
     }
 
-    config->comm_mode = WifiCommMode::kMicroRos;
+    config->comm_mode = WifiCommMode::kMicroRosUart;
     config->chassis_type = ChassisType::kMecanum;
     strncpy(config->microros_agent_ip, net_cfg::kDefaultMicroRosAgentIp,
             sizeof(config->microros_agent_ip) - 1);

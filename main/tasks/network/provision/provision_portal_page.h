@@ -401,7 +401,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
           <label id="comm-mode-label" for="comm-mode">默认通信协议</label>
           <select id="comm-mode" name="comm_mode">
             <option value="micro_ros">micro-ROS</option>
-            <option value="microros_uart">micro-ROS UART</option>
+            <option value="microros_uart" selected>micro-ROS UART</option>
           </select>
         </div>
         <div>
