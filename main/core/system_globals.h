@@ -40,6 +40,7 @@ struct RuntimeSettings {
 
 struct AppQueues {
     QueueHandle_t imu_state = nullptr;
+    QueueHandle_t battery_state = nullptr;
     QueueHandle_t motion_state = nullptr;
     QueueHandle_t ultrasonic_state = nullptr;
     QueueHandle_t lidar_state = nullptr;
@@ -86,6 +87,7 @@ SystemGlobals& system_globals();
 void motion_task(void *p);
 void arm_task(void *p);
 void imu_task(void *p);
+void battery_task(void *p);
 void ultrasonic_task(void *p);
 void peripheral_task(void *p);
 void lidar_task(void *p);

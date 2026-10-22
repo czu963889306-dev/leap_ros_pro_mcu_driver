@@ -39,7 +39,7 @@ void lidar_task(void *p) {
                 // 旋转180° + 左右镜像修正
                 angle = (180 - angle + 360) % 360;
                 // 以 180° 为中心屏蔽 180°范围：90°~269°。
-                if (angle >= 90 && angle < 270)
+                if (angle >= 90 && angle < 269)
                     continue;
 
                 // 10 cm 以内的障碍物视为无效点，不写入扫描数据。

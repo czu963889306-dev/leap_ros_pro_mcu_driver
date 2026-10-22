@@ -1,5 +1,6 @@
 #include "microros_internal.h"
 #include "microros_runtime.h"
+#include "microros_time_sync.h"
 
 #include "esp_log.h"
 #include "geometry_msgs/msg/pose.h"
@@ -11,9 +12,9 @@
 #include "nav_msgs/msg/odometry.h"
 #include "rcl/node_options.h"
 #include "rmw/qos_profiles.h"
+#include "rmw_microxrcedds_c/config.h"
 #include "rmw_microros/ping.h"
 #include "rmw_microros/rmw_microros.h"
-#include "rmw_microros/time_sync.h"
 #include "rosidl_runtime_c/primitives_sequence_functions.h"
 #include "rosidl_runtime_c/string_functions.h"
 #include "sensor_msgs/msg/imu.h"
@@ -32,10 +33,13 @@ enum WaitSetSubscriptionIndex : size_t {
 };
 
 constexpr size_t kPublishTimerCount = 1;
+static_assert(RMW_UXRCE_MAX_PUBLISHERS == ros_cfg::kPublisherCount,
+              "Publisher limit mismatch: rebuild libmicroros with app-colcon.meta");
 
 void reset_ros_handles() {
     s_odom_publisher = rcl_get_zero_initialized_publisher();
     s_imu_publisher = rcl_get_zero_initialized_publisher();
+    s_battery_publisher = rcl_get_zero_initialized_publisher();
     s_scan_publisher = rcl_get_zero_initialized_publisher();
     s_arm_pose_publisher = rcl_get_zero_initialized_publisher();
     s_wifi_config_publisher = rcl_get_zero_initialized_publisher();
@@ -60,6 +64,17 @@ bool init_message_storage() {
     rosidl_runtime_c__String__init(&s_imu_msg.header.frame_id);
     rosidl_runtime_c__String__init(&s_scan_msg.header.frame_id);
     s_strings_initialized = true;
+
+    if (!sensor_msgs__msg__BatteryState__init(&s_battery_msg)) {
+        ESP_LOGE(kTag, "failed to initialize BatteryState");
+        return false;
+    }
+    s_battery_msg_initialized = true;
+    if (!rosidl_runtime_c__String__assign(&s_battery_msg.header.frame_id, ros_cfg::kBatteryFrame) ||
+        !rosidl_runtime_c__String__assign(&s_battery_msg.location, "main")) {
+        ESP_LOGE(kTag, "failed to allocate BatteryState strings");
+        return false;
+    }
 
     (void)rosidl_runtime_c__String__assign(&s_odom_msg.header.frame_id, ros_cfg::kOdomFrame);
     (void)rosidl_runtime_c__String__assign(&s_odom_msg.child_frame_id, ros_cfg::kBaseFrame);
@@ -94,6 +109,8 @@ bool init_context() {
     MICROROS_RCCHECK(rcl_init_options_init(&s_init_options, s_allocator));
     s_init_options_initialized = true;
 
+    // Keep the agent availability check used by the reference UART transport;
+    // this is independent of the removed UART start-command handshake.
     const rmw_ret_t ping_ret = rmw_uros_ping_agent(
         ros_cfg::kInitialAgentPingTimeoutMs,
         ros_cfg::kInitialAgentPingAttempts);
@@ -105,9 +122,7 @@ bool init_context() {
     MICROROS_RCCHECK(rcl_init(0, nullptr, &s_init_options, &s_context));
     s_context_initialized = true;
 
-    if (!rmw_uros_epoch_synchronized()) {
-        (void)rmw_uros_sync_session(ros_cfg::kTimeSyncTimeoutMs);
-    }
+    update_time_sync(ros_cfg::kTimeSyncTimeoutMs);
     return true;
 }
 
@@ -156,6 +171,15 @@ bool init_publishers() {
         ros_cfg::kScanTopic,
         &state_pub_options));
     s_scan_publisher_initialized = true;
+
+    s_battery_publisher = rcl_get_zero_initialized_publisher();
+    MICROROS_RCCHECK(rcl_publisher_init(
+        &s_battery_publisher,
+        &s_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, BatteryState),
+        ros_cfg::kBatteryTopic,
+        &state_pub_options));
+    s_battery_publisher_initialized = true;
 
     s_arm_pose_publisher = rcl_get_zero_initialized_publisher();
     MICROROS_RCCHECK(rcl_publisher_init(
@@ -294,6 +318,7 @@ bool init_timer_and_wait_set() {
 
 bool create_ros_entities() {
     s_publish_tick = 0;
+    reset_time_sync();
     reset_ros_handles();
     reset_host_info_state();
 
@@ -308,13 +333,11 @@ bool create_ros_entities() {
     }
 
     s_ros_created = true;
-    s_ros_session_start_ms =
-        static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
-    s_last_host_info_timeout_log_ms = 0;
     return true;
 }
 
 void destroy_ros_entities() {
+    reset_time_sync();
     if (!s_ros_created &&
         !s_strings_initialized &&
         !s_scan_ranges_initialized &&
@@ -345,6 +368,10 @@ void destroy_ros_entities() {
     if (s_scan_publisher_initialized) {
         cleanup_result(rcl_publisher_fini(&s_scan_publisher, &s_node));
         s_scan_publisher_initialized = false;
+    }
+    if (s_battery_publisher_initialized) {
+        cleanup_result(rcl_publisher_fini(&s_battery_publisher, &s_node));
+        s_battery_publisher_initialized = false;
     }
     if (s_arm_pose_publisher_initialized) {
         cleanup_result(rcl_publisher_fini(&s_arm_pose_publisher, &s_node));
@@ -413,6 +440,10 @@ void destroy_ros_entities() {
     if (s_scan_ranges_initialized) {
         rosidl_runtime_c__float32__Sequence__fini(&s_scan_msg.ranges);
         s_scan_ranges_initialized = false;
+    }
+    if (s_battery_msg_initialized) {
+        sensor_msgs__msg__BatteryState__fini(&s_battery_msg);
+        s_battery_msg_initialized = false;
     }
     s_ros_created = false;
     reset_ros_handles();
@@ -513,7 +544,7 @@ bool spin_once(int timeout_ms) {
 
 void log_active_transport(bool use_uart) {
     if (use_uart) {
-        ESP_LOGI(kTag, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose,/wifi_config, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
+        ESP_LOGI(kTag, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
                  static_cast<int>(net_cfg::kMicroRosUartPort),
                  static_cast<int>(net_cfg::kMicroRosUartTxPin),
                  static_cast<int>(net_cfg::kMicroRosUartRxPin),
@@ -521,7 +552,7 @@ void log_active_transport(bool use_uart) {
         return;
     }
 
-    ESP_LOGI(kTag, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose,/wifi_config, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
+    ESP_LOGI(kTag, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
              system_globals().runtime.microros_agent_ip,
              static_cast<unsigned>(system_globals().runtime.microros_agent_port));
 }
@@ -532,15 +563,19 @@ void log_active_transport(bool use_uart) {
 void microros_runtime_loop(void) {
     using namespace microros;
 
+    // UART0 is also the boot console. Allow startup Wi-Fi/IP logs to be
+    // emitted before switching to the micro-ROS transport at 921600 baud.
+    if (system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRosUart) {
+        ESP_LOGI(kTag, "Delaying micro-ROS UART startup for %u ms",
+                 static_cast<unsigned>(net_cfg::kMicroRosUartStartupDelayMs));
+        vTaskDelay(pdMS_TO_TICKS(net_cfg::kMicroRosUartStartupDelayMs));
+    }
+
     while (1) {
         const bool use_udp = system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRos;
         const bool use_uart = system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRosUart;
         if (use_udp || use_uart) {
             if (!s_ros_created) {
-                if (use_uart && !s_uart_start_received && !wait_for_uart_start_command()) {
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                    continue;
-                }
                 const bool transport_ready = use_uart ? setup_uart_transport() : setup_udp_transport();
                 if (transport_ready && create_ros_entities()) {
                     log_active_transport(use_uart);
@@ -551,22 +586,13 @@ void microros_runtime_loop(void) {
                 }
             }
             if (!spin_once(20)) {
-                if (use_uart) {
-                    s_uart_start_received = false;
-                    reset_host_info_state();
-                    ESP_LOGW(kTag, "micro-ROS UART agent disconnected; waiting for Linux host start command");
-                }
+                ESP_LOGW(kTag, "micro-ROS transport stopped; recreating session");
                 destroy_ros_entities();
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
             }
-            if (use_uart && host_info_timed_out()) {
-                s_uart_start_received = false;
-                reset_host_info_state();
-                destroy_ros_entities();
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                continue;
-            }
+            // Serialize time exchange with publishing/subscriptions on this task.
+            update_time_sync(ros_cfg::kTimeSyncRuntimeTimeoutMs);
         } else {
             if (s_ros_created) {
                 destroy_ros_entities();

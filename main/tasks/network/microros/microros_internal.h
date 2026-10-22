@@ -21,6 +21,7 @@
 #include "rcl/wait.h"
 #include "rclc/executor.h"
 #include "sensor_msgs/msg/imu.h"
+#include "sensor_msgs/msg/battery_state.h"
 #include "sensor_msgs/msg/laser_scan.h"
 #include "std_msgs/msg/header.h"
 #include "std_msgs/msg/string.h"
@@ -48,10 +49,6 @@ struct UartTransportContext {
 extern UdpTransportContext s_udp_ctx;
 extern UartTransportContext s_uart_ctx;
 extern bool s_uart_transport_initialized;
-extern bool s_uart_start_received;
-extern uint8_t s_uart_start_filter_pending[sizeof(net_cfg::kMicroRosUartStartCommand) - 1];
-extern size_t s_uart_start_filter_pending_len;
-extern bool s_uart_start_filter_drop_delimiter;
 
 extern geometry_msgs__msg__Twist s_cmd_vel_msg;
 extern geometry_msgs__msg__Vector3 s_servo_cmd_msg;
@@ -60,10 +57,12 @@ extern std_msgs__msg__String s_wifi_config_msg;
 extern geometry_msgs__msg__Pose s_arm_pose_msg;
 extern nav_msgs__msg__Odometry s_odom_msg;
 extern sensor_msgs__msg__Imu s_imu_msg;
+extern sensor_msgs__msg__BatteryState s_battery_msg;
 extern sensor_msgs__msg__LaserScan s_scan_msg;
 
 extern rcl_publisher_t s_odom_publisher;
 extern rcl_publisher_t s_imu_publisher;
+extern rcl_publisher_t s_battery_publisher;
 extern rcl_publisher_t s_scan_publisher;
 extern rcl_publisher_t s_arm_pose_publisher;
 extern rcl_publisher_t s_wifi_config_publisher;
@@ -98,6 +97,8 @@ extern bool s_context_initialized;
 extern bool s_node_initialized;
 extern bool s_odom_publisher_initialized;
 extern bool s_imu_publisher_initialized;
+extern bool s_battery_msg_initialized;
+extern bool s_battery_publisher_initialized;
 extern bool s_scan_publisher_initialized;
 extern bool s_arm_pose_publisher_initialized;
 extern bool s_wifi_config_publisher_initialized;
@@ -113,8 +114,6 @@ extern bool s_timer_initialized;
 extern bool s_wait_set_initialized;
 
 extern uint32_t s_publish_tick;
-extern uint32_t s_ros_session_start_ms;
-extern uint32_t s_last_host_info_timeout_log_ms;
 extern char s_host_info_data[ros_cfg::kHostInfoTextCapacity];
 extern char s_wifi_config_data[ros_cfg::kWifiConfigTextCapacity];
 extern char s_last_wifi_config_ssid[33];
@@ -123,14 +122,11 @@ void cleanup_result(rcl_ret_t ret);
 
 bool setup_udp_transport();
 bool setup_uart_transport();
-bool wait_for_uart_start_command();
-
 void prepare_host_info_message_buffer();
 void prepare_wifi_config_message_buffer();
 void handle_cmd_vel(const geometry_msgs__msg__Twist *msg);
 void handle_servo_cmd_vector(const geometry_msgs__msg__Vector3 *msg);
 void handle_host_info(const std_msgs__msg__String *msg);
-bool host_info_timed_out();
 void reset_host_info_state();
 
 void handle_set_arm_pose_service(const void *req, void *res);

@@ -28,16 +28,14 @@ static constexpr const char kDefaultMicroRosAgentIp[] = LEAP_CONFIG_DEFAULT_MICR
 static constexpr uint16_t kDefaultMicroRosAgentPort = 8888;
 static constexpr uint16_t kMicroRosLocalPort = 8888;
 
-static constexpr uart_port_t kMicroRosUartPort = UART_NUM_2;
-static constexpr gpio_num_t kMicroRosUartTxPin = GPIO_NUM_37;
-static constexpr gpio_num_t kMicroRosUartRxPin = GPIO_NUM_38;
+static constexpr uart_port_t kMicroRosUartPort = UART_NUM_0;
+static constexpr gpio_num_t kMicroRosUartTxPin = GPIO_NUM_43;
+static constexpr gpio_num_t kMicroRosUartRxPin = GPIO_NUM_44;
 static constexpr int kMicroRosUartBaudRate = 921600;
 static constexpr size_t kMicroRosUartRxBufferSize = 4096;
 static constexpr size_t kMicroRosUartTxBufferSize = 4096;
 static constexpr int kMicroRosUartReadMaxWaitMs = 5;
-static constexpr int kMicroRosUartStartReadWaitMs = 100;
-static constexpr uint32_t kMicroRosUartStartLogPolls = 50;
-static constexpr const char kMicroRosUartStartCommand[] = "MATURO_MICROROS_START";
+static constexpr uint32_t kMicroRosUartStartupDelayMs = 8000;
 
 static constexpr uart_port_t kLidarUartPort = UART_NUM_1;
 static constexpr int kLidarBaudRate = 230400;

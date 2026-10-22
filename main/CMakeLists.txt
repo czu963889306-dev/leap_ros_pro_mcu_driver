@@ -11,6 +11,7 @@ set(APP_SRCS
     "tasks/control/arm_task.cpp"
     "tasks/control/motion_task.cpp"
     "tasks/sensors/imu_task.cpp"
+    "tasks/sensors/battery_task.cpp"
     "tasks/sensors/ultrasonic_task.cpp"
     "tasks/sensors/lidar_task.cpp"
     "tasks/io/peripheral_task.cpp"
@@ -23,6 +24,7 @@ set(APP_SRCS
     "tasks/network/microros/microros_services.cpp"
     "tasks/network/microros/microros_publishers.cpp"
     "tasks/network/microros/microros_runtime.cpp"
+    "tasks/network/microros/microros_time_sync.cpp"
     "tasks/network/microros/microros_task.cpp"
     "network/wifi_app.cpp"
 )
@@ -51,6 +53,7 @@ idf_component_register(
         lwip
         motor_driver
         encoder_driver
+        battery_adc
         ultrasonic_sensor
         ws2812_driver
         button_driver

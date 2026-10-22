@@ -465,6 +465,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
           <div class="kv"><span>Ultrasonic</span><strong id="stat-ultrasonic">--</strong></div>
           <div class="kv"><span>Lidar</span><strong id="stat-lidar">--</strong></div>
           <div class="kv"><span>Gamepad</span><strong id="stat-gamepad">--</strong></div>
+          <div class="kv"><span>Battery</span><strong id="stat-battery">--</strong></div>
         </div>
         <div class="status-panel">
           <h3 id="panel-wifi-title">网络</h3>
@@ -860,6 +861,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       const ultrasonic = data.ultrasonic || {};
       const lidar = data.lidar || {};
       const gamepad = data.gamepad || {};
+      const battery = data.battery || {};
       const pid = data.pid || {};
       const runtime = data.runtime || {};
       const camera = data.camera || {};
@@ -896,6 +898,7 @@ static const char kProvisionHtmlTemplate[] = R"HTML(
       text('stat-ultrasonic', ultrasonic.valid ? `${fixed(ultrasonic.distance_cm, 1)} cm | ${ultrasonic.obstacle ? 'OBS' : 'clear'}` : i18n.invalid);
       text('stat-lidar', lidar.valid ? `${lidar.valid_points} pts | ${lidar.min_mm}-${lidar.max_mm} mm` : i18n.invalid);
       text('stat-gamepad', gamepad.valid ? `${gamepad.connected ? i18n.connected : i18n.disconnected} | ${gamepad.left_x},${gamepad.left_y} / ${gamepad.right_x},${gamepad.right_y}` : i18n.invalid);
+      text('stat-battery', battery.valid ? `${fixed(battery.voltage_v, 2)} V | ${battery.percentage}%% | ADC ${fixed(battery.adc_voltage_v, 3)} V` : i18n.invalid);
 
       text('stat-wifi-mode', wifi.mode || '--');
       text('stat-wifi-ssid', wifi.ssid || '--');

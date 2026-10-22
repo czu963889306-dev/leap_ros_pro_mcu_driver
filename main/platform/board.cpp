@@ -44,6 +44,9 @@ MotionController robot(motor_fl, motor_fr, motor_bl, motor_br,
 UltrasonicSensor ultrasonic(board_cfg::kUltrasonicPin);
 Ws2812Driver rgb_led(board_cfg::kRgbPin, board_cfg::kRgbLedCount);
 StatusLed status_led(board_cfg::kStatusLedPin);
+BatteryAdc battery_adc(board_cfg::kBatteryAdcUnit, board_cfg::kBatteryAdcChannel,
+                       board_cfg::kBatteryDividerRatio,
+                       board_cfg::kBatteryEmptyVoltage, board_cfg::kBatteryFullVoltage);
 ButtonDriver io0_button(board_cfg::kIo0ButtonPin, true);
 
 ServoDriver servo_1(board_cfg::kServo1Pin, 0, 90.0f, arm_cfg::kServoReversed[0]);

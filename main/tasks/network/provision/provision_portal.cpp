@@ -4,6 +4,7 @@
 #include "system_globals.h"
 #include "camera_i2c_client.h"
 #include "wifi_app.h"
+#include "msg/battery_msg.h"
 #include "msg/gamepad_msg.h"
 #include "msg/imu_msg.h"
 #include "msg/lidar_msg.h"
@@ -494,6 +495,7 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
     UltrasonicMsg ultrasonic = {};
     GamepadMsg gamepad = {};
     TemperatureMsg temperature = {};
+    BatteryMsg battery = {};
     LidarMsg lidar = {};
 
     const bool has_imu = system_globals().queues.imu_state != nullptr && xQueuePeek(system_globals().queues.imu_state, &imu, 0) == pdTRUE;
@@ -503,6 +505,9 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
     const bool has_temperature = system_globals().queues.temperature_state != nullptr &&
                                  xQueuePeek(system_globals().queues.temperature_state, &temperature, 0) == pdTRUE &&
                                  temperature.valid;
+    const bool has_battery = system_globals().queues.battery_state != nullptr &&
+                             xQueuePeek(system_globals().queues.battery_state, &battery, 0) == pdTRUE &&
+                             battery.valid;
     const bool has_lidar = system_globals().queues.lidar_state != nullptr && xQueuePeek(system_globals().queues.lidar_state, &lidar, 0) == pdTRUE;
 
     CameraI2cStatus camera = {};
@@ -643,6 +648,17 @@ static esp_err_t status_get_handler(httpd_req_t *req) {
         ",\"temperature\":{\"valid\":%s,\"celsius\":%.2f}",
         has_temperature ? "true" : "false",
         has_temperature ? temperature.celsius : 0.0f);
+
+    ok = ok && append_format(
+        s_status_json,
+        kStatusJsonSize,
+        &offset,
+        ",\"battery\":{\"valid\":%s,\"voltage_v\":%.3f,\"adc_voltage_v\":%.4f,\"percentage\":%u,\"raw\":%d}",
+        has_battery ? "true" : "false",
+        has_battery ? battery.voltage_v : 0.0f,
+        has_battery ? battery.adc_voltage_v : 0.0f,
+        has_battery ? static_cast<unsigned>(battery.percentage) : 0u,
+        has_battery ? battery.raw : 0);
 
     ok = ok && append_format(
         s_status_json,

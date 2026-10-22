@@ -129,33 +129,6 @@ void handle_host_info(const std_msgs__msg__String *msg) {
              system_globals().runtime.target_host_info.hostip);
 }
 
-bool host_info_timed_out() {
-    if (system_globals().runtime.wifi_comm_mode != WifiCommMode::kMicroRosUart || !s_ros_created) {
-        return false;
-    }
-
-    const uint32_t now_ms =
-        static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
-    const uint32_t last_update_ms =
-        system_globals().runtime.target_host_info.valid ? system_globals().runtime.target_host_info.last_update_ms : 0;
-    const uint32_t reference_ms =
-        last_update_ms != 0 ? last_update_ms : s_ros_session_start_ms;
-    const uint32_t timeout_ms =
-        last_update_ms != 0 ? ros_cfg::kHostInfoHeartbeatTimeoutMs : ros_cfg::kHostInfoStartupTimeoutMs;
-
-    if (reference_ms == 0 || static_cast<uint32_t>(now_ms - reference_ms) <= timeout_ms) {
-        return false;
-    }
-
-    if (s_last_host_info_timeout_log_ms == 0 ||
-        static_cast<uint32_t>(now_ms - s_last_host_info_timeout_log_ms) >=
-            ros_cfg::kHostInfoTimeoutLogIntervalMs) {
-        ESP_LOGW(kTag, "host_info heartbeat timeout; waiting for Linux host start command");
-        s_last_host_info_timeout_log_ms = now_ms;
-    }
-    return true;
-}
-
 void reset_host_info_state() {
     system_globals().runtime.target_host_info.valid = false;
     system_globals().runtime.target_host_info.last_update_ms = 0;

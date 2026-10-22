@@ -10,6 +10,7 @@
 #include "lsm6ds3_driver.h"
 #include "motion_controller.h"
 #include "status_led.h"
+#include "battery_adc.h"
 #include "esp_log.h"
 
 // 声明所有硬件对象为 extern
@@ -23,6 +24,7 @@ extern MotionController robot;
 extern UltrasonicSensor ultrasonic;
 extern Ws2812Driver rgb_led;
 extern StatusLed status_led;
+extern BatteryAdc battery_adc;
 extern ButtonDriver io0_button;
 extern ServoDriver servo_1;
 extern ServoDriver servo_2;

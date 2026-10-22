@@ -1,4 +1,5 @@
 #include "microros_internal.h"
+#include "microros_time_sync.h"
 
 #include <math.h>
 #include <string.h>
@@ -6,10 +7,10 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "msg/arm_msg.h"
+#include "msg/battery_msg.h"
 #include "msg/imu_msg.h"
 #include "msg/lidar_msg.h"
 #include "msg/motion_msg.h"
-#include "rmw_microros/rmw_microros.h"
 #include "system_globals.h"
 #include "wifi_app.h"
 
@@ -143,6 +144,29 @@ void publish_scan(int64_t stamp_ms) {
     MICROROS_RCSOFTCHECK(rcl_publish(&s_scan_publisher, &s_scan_msg, nullptr));
 }
 
+void publish_battery(int64_t stamp_ms) {
+    BatteryMsg battery = {};
+    if (system_globals().queues.battery_state == nullptr ||
+        xQueuePeek(system_globals().queues.battery_state, &battery, 0) != pdTRUE ||
+        !battery.valid) {
+        return;
+    }
+
+    set_stamp(&s_battery_msg.header, stamp_ms);
+    s_battery_msg.voltage = battery.voltage_v;
+    s_battery_msg.percentage = static_cast<float>(battery.percentage) / 100.0f;
+    s_battery_msg.temperature = NAN;
+    s_battery_msg.current = NAN;
+    s_battery_msg.charge = NAN;
+    s_battery_msg.capacity = NAN;
+    s_battery_msg.design_capacity = NAN;
+    s_battery_msg.power_supply_status = sensor_msgs__msg__BatteryState__POWER_SUPPLY_STATUS_UNKNOWN;
+    s_battery_msg.power_supply_health = sensor_msgs__msg__BatteryState__POWER_SUPPLY_HEALTH_UNKNOWN;
+    s_battery_msg.power_supply_technology = sensor_msgs__msg__BatteryState__POWER_SUPPLY_TECHNOLOGY_LION;
+    s_battery_msg.present = true;
+    MICROROS_RCSOFTCHECK(rcl_publish(&s_battery_publisher, &s_battery_msg, nullptr));
+}
+
 void publish_arm_pose() {
     ArmMsg arm = {};
     if (system_globals().queues.arm_state == nullptr || xQueuePeek(system_globals().queues.arm_state, &arm, 0) != pdTRUE || !arm.valid) {
@@ -201,14 +225,20 @@ void publish_state_timer(rcl_timer_t *timer, int64_t) {
         return;
     }
 
-    const int64_t stamp_ms = rmw_uros_epoch_millis();
-    publish_odom(stamp_ms);
-    publish_imu(stamp_ms);
-    publish_arm_pose();
-
-    if ((++s_publish_tick % ros_cfg::kScanPublishDivider) == 0) {
-        publish_scan(stamp_ms);
+    ++s_publish_tick;
+    int64_t stamp_ms = 0;
+    if (get_synced_stamp_ms(stamp_ms)) {
+        publish_odom(stamp_ms);
+        publish_imu(stamp_ms);
+        if ((s_publish_tick % ros_cfg::kScanPublishDivider) == 0) {
+            publish_scan(stamp_ms);
+        }
+        if ((s_publish_tick % ros_cfg::kBatteryPublishDivider) == 0) {
+            publish_battery(stamp_ms);
+        }
     }
+    // These messages have no header stamp and do not need a synchronized clock.
+    publish_arm_pose();
     if ((s_publish_tick % ros_cfg::kWifiConfigPublishTicks) == 0) {
         publish_wifi_config();
     }

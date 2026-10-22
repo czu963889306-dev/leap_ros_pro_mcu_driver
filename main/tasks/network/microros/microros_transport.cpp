@@ -175,53 +175,6 @@ size_t transport_write_uart(
     return written > 0 ? static_cast<size_t>(written) : 0;
 }
 
-bool uart_start_filter_is_prefix(const uint8_t *bytes, size_t len) {
-    if (bytes == nullptr || len >= sizeof(net_cfg::kMicroRosUartStartCommand)) {
-        return false;
-    }
-    return memcmp(bytes, net_cfg::kMicroRosUartStartCommand, len) == 0;
-}
-
-size_t filter_uart_start_command_bytes(uint8_t *buf, size_t len) {
-    if (buf == nullptr || len == 0) {
-        return 0;
-    }
-
-    size_t out_len = 0;
-    const size_t command_len = sizeof(net_cfg::kMicroRosUartStartCommand) - 1;
-    for (size_t i = 0; i < len; ++i) {
-        const uint8_t byte = buf[i];
-        if (s_uart_start_filter_drop_delimiter) {
-            if (byte == '\r' || byte == '\n') {
-                continue;
-            }
-            s_uart_start_filter_drop_delimiter = false;
-        }
-
-        s_uart_start_filter_pending[s_uart_start_filter_pending_len++] = byte;
-        while (s_uart_start_filter_pending_len > 0 &&
-               !uart_start_filter_is_prefix(
-                   s_uart_start_filter_pending,
-                   s_uart_start_filter_pending_len)) {
-            buf[out_len++] = s_uart_start_filter_pending[0];
-            --s_uart_start_filter_pending_len;
-            if (s_uart_start_filter_pending_len > 0) {
-                memmove(
-                    s_uart_start_filter_pending,
-                    s_uart_start_filter_pending + 1,
-                    s_uart_start_filter_pending_len);
-            }
-        }
-
-        if (s_uart_start_filter_pending_len == command_len) {
-            s_uart_start_filter_pending_len = 0;
-            s_uart_start_filter_drop_delimiter = true;
-        }
-    }
-
-    return out_len;
-}
-
 size_t transport_read_uart(
     uxrCustomTransport *transport,
     uint8_t *buf,
@@ -238,9 +191,7 @@ size_t transport_read_uart(
     const TickType_t ticks = pdMS_TO_TICKS(wait_ms);
     const int received = uart_read_bytes(ctx->port, buf, len, ticks);
     taskYIELD();
-    return received > 0
-        ? filter_uart_start_command_bytes(buf, static_cast<size_t>(received))
-        : 0;
+    return received > 0 ? static_cast<size_t>(received) : 0;
 }
 
 }  // namespace
@@ -279,54 +230,6 @@ bool setup_uart_transport() {
         transport_write_uart,
         transport_read_uart);
     return true;
-}
-
-bool wait_for_uart_start_command() {
-    memset(&s_uart_ctx, 0, sizeof(s_uart_ctx));
-    s_uart_ctx.port = net_cfg::kMicroRosUartPort;
-
-    if (!ensure_uart_driver_initialized(&s_uart_ctx)) {
-        return false;
-    }
-
-    ESP_LOGI(kTag, "micro-ROS UART waiting for host start command: %s",
-             net_cfg::kMicroRosUartStartCommand);
-
-    size_t matched = 0;
-    uint32_t polls = 0;
-    uint8_t bytes[64] = {};
-    const size_t command_len = strlen(net_cfg::kMicroRosUartStartCommand);
-
-    while (system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRosUart) {
-        const int received = uart_read_bytes(
-            net_cfg::kMicroRosUartPort,
-            bytes,
-            sizeof(bytes),
-            pdMS_TO_TICKS(net_cfg::kMicroRosUartStartReadWaitMs));
-
-        for (int i = 0; i < received; ++i) {
-            const char ch = static_cast<char>(bytes[i]);
-            if (ch == net_cfg::kMicroRosUartStartCommand[matched]) {
-                ++matched;
-                if (matched >= command_len) {
-                    s_uart_start_received = true;
-                    s_uart_start_filter_pending_len = 0;
-                    s_uart_start_filter_drop_delimiter = false;
-                    uart_flush_input(net_cfg::kMicroRosUartPort);
-                    ESP_LOGI(kTag, "micro-ROS UART start command received");
-                    return true;
-                }
-            } else {
-                matched = (ch == net_cfg::kMicroRosUartStartCommand[0]) ? 1 : 0;
-            }
-        }
-
-        if ((++polls % net_cfg::kMicroRosUartStartLogPolls) == 0) {
-            ESP_LOGI(kTag, "still waiting for micro-ROS UART host start command");
-        }
-    }
-
-    return false;
 }
 
 }  // namespace microros

@@ -16,6 +16,7 @@
 #include "msg/gamepad_msg.h"
 #include "msg/arm_msg.h"
 #include "msg/imu_msg.h"
+#include "msg/battery_msg.h"
 #include "msg/lidar_msg.h"
 #include "msg/motion_msg.h"
 #include "msg/pid_msg.h"
@@ -131,6 +132,8 @@ static void init_pid_config(void) {
 
 static void create_runtime_queues(void) {
     system_globals().queues.imu_state = xQueueCreate(1, sizeof(ImuMsg));
+    system_globals().queues.battery_state = xQueueCreate(1, sizeof(BatteryMsg));
+    configASSERT(system_globals().queues.battery_state != nullptr);
     system_globals().queues.motion_state = xQueueCreate(1, sizeof(MotionMsg));
     system_globals().queues.ultrasonic_state = xQueueCreate(1, sizeof(UltrasonicMsg));
     system_globals().queues.lidar_state = xQueueCreate(1, sizeof(LidarMsg));
@@ -174,6 +177,9 @@ void app_runtime_startup(void) {
     create_runtime_queues();
 
     xTaskCreate(imu_task, "imu", 4096, NULL, 5, NULL);
+    if (xTaskCreate(battery_task, "battery", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start battery task");
+    }
     xTaskCreate(motion_task, "motion", 4096, NULL, 5, NULL);
     xTaskCreate(arm_task, "arm", 4096, NULL, 4, NULL);
     // xTaskCreate(ultrasonic_task, "ultrasonic", 4096, NULL, 4, NULL);
