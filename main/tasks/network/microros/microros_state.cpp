@@ -1,5 +1,8 @@
 #include "microros_internal.h"
 
+#include "esp_heap_caps.h"
+#include "rcl/error_handling.h"
+
 namespace microros {
 
 const char *const kTag = "MICROROS";
@@ -83,6 +86,14 @@ void cleanup_result(rcl_ret_t ret) {
     if (ret != RCL_RET_OK) {
         ESP_LOGW(kTag, "cleanup status: %d", static_cast<int>(ret));
     }
+}
+
+void log_rcl_failure(const char *operation, rcl_ret_t ret, int line) {
+    ESP_LOGW(kTag, "%s failed at line %d: %d (%s); heap free=%u largest=%u bytes",
+             operation, line, static_cast<int>(ret), rcl_get_error_string().str,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+    rcl_reset_error();
 }
 
 }  // namespace microros

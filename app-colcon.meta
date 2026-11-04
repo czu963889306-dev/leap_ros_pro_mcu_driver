@@ -17,7 +17,7 @@
                 "-DRMW_UXRCE_MAX_TOPICS=10",
                 "-DRMW_UXRCE_MAX_SERVICES=3",
                 "-DRMW_UXRCE_MAX_CLIENTS=1",
-                "-DRMW_UXRCE_MAX_HISTORY=8"
+                "-DRMW_UXRCE_MAX_HISTORY=1"
             ]
         }
     }

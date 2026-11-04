@@ -210,9 +210,21 @@ There are exactly **6 publishers**, matching `RMW_UXRCE_MAX_PUBLISHERS=6` in
 `app-colcon.meta`; rosout is disabled. There are **4 subscriptions**
 (`RMW_UXRCE_MAX_SUBSCRIPTIONS=4`) and 3 services, each with its own entity pool.
 The explicit topic pool is **10** (`RMW_UXRCE_MAX_TOPICS=10`, previously 9 derived
-from publishers + subscriptions). Receive history grows from 1 to **8** slots
-(`RMW_UXRCE_MAX_HISTORY=8`), shared by subscriptions and service requests/replies.
-Compile-time checks reject stale publisher, subscription, topic or history limits.
+from publishers + subscriptions). Receive history retains the original **1** slot
+(`RMW_UXRCE_MAX_HISTORY=1`), shared by subscriptions and service requests/replies.
+History limits queued samples, not the number of topics/services that can exist.
+At the current 2048-byte MTU and stream history of 4, each slot reserves 8192 bytes
+of payload plus 64 bytes of bookkeeping. Eight slots consumed 66,048 bytes versus
+8,256 bytes for one: an unnecessary 57,792-byte static RAM increase that starved
+Wi-Fi/HTTP and ROS initialization of heap. Keep the existing sample budget when
+adding this topic; simultaneous incoming samples can exhaust this one-slot pool,
+so callers should wait for service replies and avoid command bursts.
+Compile-time checks reject stale publisher, subscription, topic or history limits,
+including a cached library header that still specifies eight history slots.
+
+On initialization failure, logs now identify the failed ROS operation or HTTP
+startup error and report free heap and the largest available block. Failure to
+create the Web configuration task is also reported instead of silently ignored.
 
 The managed component caches `libmicroros.a`; changing `app-colcon.meta`
 alone does not rebuild it. To rebuild the cached library from existing

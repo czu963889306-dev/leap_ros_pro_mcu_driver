@@ -41,8 +41,11 @@ static_assert(RMW_UXRCE_MAX_SUBSCRIPTIONS >= kSubscriptionCount,
               "Subscription limit too small: rebuild libmicroros with app-colcon.meta");
 static_assert(RMW_UXRCE_MAX_TOPICS_INTERNAL >= ros_cfg::kPublisherCount + kSubscriptionCount,
               "Topic limit too small: rebuild libmicroros with app-colcon.meta");
-static_assert(RMW_UXRCE_MAX_HISTORY >= kSubscriptionCount + 3,
-              "Receive history too small for subscriptions and services: rebuild libmicroros");
+// Receive history is a shared sample pool, not an entity limit. Each slot costs
+// 8 KiB at the current MTU/stream settings; keep the original one-slot budget so
+// Wi-Fi, the HTTP portal and ROS entity initialization retain enough heap.
+static_assert(RMW_UXRCE_MAX_HISTORY == 1,
+              "Receive history budget mismatch: rebuild libmicroros with app-colcon.meta");
 
 void reset_ros_handles() {
     s_odom_publisher = rcl_get_zero_initialized_publisher();

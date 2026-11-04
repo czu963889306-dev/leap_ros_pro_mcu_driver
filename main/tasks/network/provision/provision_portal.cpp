@@ -1079,8 +1079,12 @@ void provision_portal_start(void) {
     config.uri_match_fn = httpd_uri_match_wildcard;
 
     httpd_handle_t server = NULL;
-    if (httpd_start(&server, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start provisioning HTTP server");
+    const esp_err_t start_err = httpd_start(&server, &config);
+    if (start_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start provisioning HTTP server: %s; heap free=%u largest=%u bytes",
+                 esp_err_to_name(start_err),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
         return;
     }
 

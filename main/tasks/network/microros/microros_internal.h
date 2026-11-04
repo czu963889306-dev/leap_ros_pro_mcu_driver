@@ -123,6 +123,7 @@ extern char s_wifi_config_data[ros_cfg::kWifiConfigTextCapacity];
 extern char s_last_wifi_config_ssid[33];
 
 void cleanup_result(rcl_ret_t ret);
+void log_rcl_failure(const char *operation, rcl_ret_t ret, int line);
 
 bool setup_udp_transport();
 bool setup_uart_transport();
@@ -147,7 +148,7 @@ void publish_state_timer(rcl_timer_t *timer, int64_t last_call_time);
 #define MICROROS_RCCHECK(fn) do { \
     rcl_ret_t rc = (fn); \
     if (rc != RCL_RET_OK) { \
-        ESP_LOGW(microros::kTag, "rcl status line %d: %d", __LINE__, static_cast<int>(rc)); \
+        microros::log_rcl_failure(#fn, rc, __LINE__); \
         return false; \
     } \
 } while (0)
@@ -155,6 +156,6 @@ void publish_state_timer(rcl_timer_t *timer, int64_t last_call_time);
 #define MICROROS_RCSOFTCHECK(fn) do { \
     rcl_ret_t rc = (fn); \
     if (rc != RCL_RET_OK) { \
-        ESP_LOGW(microros::kTag, "rcl status line %d: %d", __LINE__, static_cast<int>(rc)); \
+        microros::log_rcl_failure(#fn, rc, __LINE__); \
     } \
 } while (0)

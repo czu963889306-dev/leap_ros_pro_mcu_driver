@@ -68,7 +68,10 @@ static void wifi_start_task(void *p) {
         status_led.SetMode(StatusLedMode::kFastBlink);
     }
 
-    xTaskCreate(wifi_provision_task, "wifi_provision", 6144, NULL, 3, NULL);
+    if (xTaskCreate(wifi_provision_task, "wifi_provision", 6144, NULL, 3, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start Web configuration task; free heap=%u bytes",
+                 static_cast<unsigned>(esp_get_free_heap_size()));
+    }
     if (sta_connected && system_globals().runtime.wifi_comm_mode != WifiCommMode::kMicroRosUart) {
         start_comm_task();
     } else if (!sta_connected && system_globals().runtime.wifi_comm_mode != WifiCommMode::kMicroRosUart) {
