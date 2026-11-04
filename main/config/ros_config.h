@@ -31,6 +31,7 @@ static constexpr const char kArmPoseTopic[] = "arm_pose";
 static constexpr const char kWifiConfigTopic[] = "wifi_config";
 static constexpr const char kCmdVelTopic[] = "cmd_vel";
 static constexpr const char kServoCmdTopic[] = "servo_cmd";
+static constexpr const char kServosCmdTopic[] = "servos_cmd";
 static constexpr const char kHostInfoTopic[] = "host_info";
 static constexpr const char kSetArmPoseService[] = "set_arm_pose";
 static constexpr const char kSetSpeedPidService[] = "set_speed_pid";

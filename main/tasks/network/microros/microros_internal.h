@@ -24,6 +24,7 @@
 #include "sensor_msgs/msg/battery_state.h"
 #include "sensor_msgs/msg/laser_scan.h"
 #include "std_msgs/msg/header.h"
+#include "std_msgs/msg/float32_multi_array.h"
 #include "std_msgs/msg/string.h"
 
 #include "network_config.h"
@@ -52,6 +53,7 @@ extern bool s_uart_transport_initialized;
 
 extern geometry_msgs__msg__Twist s_cmd_vel_msg;
 extern geometry_msgs__msg__Vector3 s_servo_cmd_msg;
+extern std_msgs__msg__Float32MultiArray s_servos_cmd_msg;
 extern std_msgs__msg__String s_host_info_msg;
 extern std_msgs__msg__String s_wifi_config_msg;
 extern geometry_msgs__msg__Pose s_arm_pose_msg;
@@ -68,6 +70,7 @@ extern rcl_publisher_t s_arm_pose_publisher;
 extern rcl_publisher_t s_wifi_config_publisher;
 extern rcl_subscription_t s_cmd_vel_subscriber;
 extern rcl_subscription_t s_servo_cmd_subscriber;
+extern rcl_subscription_t s_servos_cmd_subscriber;
 extern rcl_subscription_t s_host_info_subscriber;
 extern rcl_service_t s_set_arm_pose_service;
 extern rcl_service_t s_set_speed_pid_service;
@@ -104,6 +107,7 @@ extern bool s_arm_pose_publisher_initialized;
 extern bool s_wifi_config_publisher_initialized;
 extern bool s_cmd_vel_subscriber_initialized;
 extern bool s_servo_cmd_subscriber_initialized;
+extern bool s_servos_cmd_subscriber_initialized;
 extern bool s_host_info_subscriber_initialized;
 extern bool s_set_arm_pose_service_initialized;
 extern bool s_set_speed_pid_service_initialized;
@@ -123,9 +127,11 @@ void cleanup_result(rcl_ret_t ret);
 bool setup_udp_transport();
 bool setup_uart_transport();
 void prepare_host_info_message_buffer();
+void prepare_servos_message_buffer();
 void prepare_wifi_config_message_buffer();
 void handle_cmd_vel(const geometry_msgs__msg__Twist *msg);
 void handle_servo_cmd_vector(const geometry_msgs__msg__Vector3 *msg);
+void handle_servos_cmd(const std_msgs__msg__Float32MultiArray *msg);
 void handle_host_info(const std_msgs__msg__String *msg);
 void reset_host_info_state();
 

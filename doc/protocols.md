@@ -118,10 +118,31 @@ effective differential track width is `340 mm`.
 | --- | --- | --- |
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | `linear.x/y` m/s to `vx/vy` mm/s; `angular.z` to `wz` rad/s |
 | `/servo_cmd` | `geometry_msgs/msg/Vector3` | `x` = servo channel 1..5; `y` = angle in degrees |
+| `/servos_cmd` | `std_msgs/msg/Float32MultiArray` | `data` = five angles in degrees, channels 1..5; empty `layout.dim`, zero `data_offset` |
 | `/host_info` | `std_msgs/msg/String` | Optional target host info text: `hostname=<name> ip=<ipv4>` or `hostname=<name> hostip=<ipv4>` |
 
 Receiving `/cmd_vel` writes velocity mode to `q_motion_cmd` and clears the
 emergency stop.
+
+`/servos_cmd` accepts exactly five finite angles in [0, 180], using the same
+calibrated/reversed angle convention as `/servo_cmd`. Channel 5 is the claw.
+Invalid length, values or layout reject the entire command. The receive buffer
+has fixed capacity for five floats and no layout dimensions. Both UART and UDP
+use this subscription with best-effort, volatile QoS.
+
+```bash
+ros2 topic pub --once /servos_cmd std_msgs/msg/Float32MultiArray \
+  "{layout: {dim: [], data_offset: 0}, data: [90.0, 0.0, 180.0, 180.0, 180.0]}"
+```
+
+One queue item carries all five targets into a shared 1-second motion plan,
+updated every 20 ms, including interpolation of the claw. This synchronizes the
+software targets; individual PWM timers are not phase locked. The newest pending
+batch replaces the previous pending batch. A new command restarts interpolation
+from the current commanded pose. A batch takes precedence over single-servo/arm
+commands consumed in the same control cycle; later commands can override it.
+Use one control interface at a time. The legacy `/servo_cmd` and UDP/ESP-NOW
+packed `ServoMsg` format remain compatible. There is no arrival acknowledgement.
 
 ### I2C Gamepad Control
 
@@ -186,9 +207,12 @@ The web page reads the same battery queue without consuming it or requiring a
 micro-ROS agent connection.
 
 There are exactly **6 publishers**, matching `RMW_UXRCE_MAX_PUBLISHERS=6` in
-`app-colcon.meta`; rosout is disabled. There are still 3 subscriptions and
-3 services, each with its own pool. A compile-time check rejects a stale
-micro-ROS header with a different publisher limit.
+`app-colcon.meta`; rosout is disabled. There are **4 subscriptions**
+(`RMW_UXRCE_MAX_SUBSCRIPTIONS=4`) and 3 services, each with its own entity pool.
+The explicit topic pool is **10** (`RMW_UXRCE_MAX_TOPICS=10`, previously 9 derived
+from publishers + subscriptions). Receive history grows from 1 to **8** slots
+(`RMW_UXRCE_MAX_HISTORY=8`), shared by subscriptions and service requests/replies.
+Compile-time checks reject stale publisher, subscription, topic or history limits.
 
 The managed component caches `libmicroros.a`; changing `app-colcon.meta`
 alone does not rebuild it. To rebuild the cached library from existing

@@ -51,6 +51,7 @@ struct AppQueues {
     QueueHandle_t gamepad_motion_cmd = nullptr;
     QueueHandle_t rgb_cmd = nullptr;
     QueueHandle_t servo_cmd = nullptr;
+    QueueHandle_t servos_cmd = nullptr;
     QueueHandle_t arm_cmd = nullptr;
     QueueHandle_t arm_state = nullptr;
     QueueHandle_t speedpid_cmd = nullptr;

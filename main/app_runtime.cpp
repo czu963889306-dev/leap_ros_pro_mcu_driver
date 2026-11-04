@@ -22,6 +22,7 @@
 #include "msg/pid_msg.h"
 #include "msg/rgb_msg.h"
 #include "msg/servo_msg.h"
+#include "msg/servos_msg.h"
 #include "msg/temperature_msg.h"
 #include "msg/ultrasonic_msg.h"
 #include "nvs_flash.h"
@@ -143,6 +144,7 @@ static void create_runtime_queues(void) {
     system_globals().queues.gamepad_motion_cmd = xQueueCreate(1, sizeof(MotionMsg));
     system_globals().queues.rgb_cmd = xQueueCreate(1, sizeof(RgbMsg));
     system_globals().queues.servo_cmd = xQueueCreate(1, sizeof(ServoMsg));
+    system_globals().queues.servos_cmd = xQueueCreate(1, sizeof(ServosMsg));
     system_globals().queues.arm_cmd = xQueueCreate(1, sizeof(ArmMsg));
     system_globals().queues.arm_state = xQueueCreate(1, sizeof(ArmMsg));
     system_globals().queues.speedpid_cmd = xQueueCreate(1, sizeof(PidMsg));

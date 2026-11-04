@@ -29,12 +29,20 @@ enum WaitSetSubscriptionIndex : size_t {
     kCmdVelSubscriptionIndex = 0,
     kServoCmdSubscriptionIndex = 1,
     kHostInfoSubscriptionIndex = 2,
-    kSubscriptionCount = 3,
+    kServosCmdSubscriptionIndex = 3,
+    kSubscriptionCount = 4,
 };
 
 constexpr size_t kPublishTimerCount = 1;
 static_assert(RMW_UXRCE_MAX_PUBLISHERS == ros_cfg::kPublisherCount,
               "Publisher limit mismatch: rebuild libmicroros with app-colcon.meta");
+
+static_assert(RMW_UXRCE_MAX_SUBSCRIPTIONS >= kSubscriptionCount,
+              "Subscription limit too small: rebuild libmicroros with app-colcon.meta");
+static_assert(RMW_UXRCE_MAX_TOPICS_INTERNAL >= ros_cfg::kPublisherCount + kSubscriptionCount,
+              "Topic limit too small: rebuild libmicroros with app-colcon.meta");
+static_assert(RMW_UXRCE_MAX_HISTORY >= kSubscriptionCount + 3,
+              "Receive history too small for subscriptions and services: rebuild libmicroros");
 
 void reset_ros_handles() {
     s_odom_publisher = rcl_get_zero_initialized_publisher();
@@ -46,6 +54,7 @@ void reset_ros_handles() {
     s_cmd_vel_subscriber = rcl_get_zero_initialized_subscription();
     s_servo_cmd_subscriber = rcl_get_zero_initialized_subscription();
     s_host_info_subscriber = rcl_get_zero_initialized_subscription();
+    s_servos_cmd_subscriber = rcl_get_zero_initialized_subscription();
     s_set_arm_pose_service = rcl_get_zero_initialized_service();
     s_set_speed_pid_service = rcl_get_zero_initialized_service();
     s_get_speed_pid_service = rcl_get_zero_initialized_service();
@@ -100,6 +109,7 @@ bool init_message_storage() {
     s_imu_msg.linear_acceleration_covariance[0] = -1.0;
     prepare_wifi_config_message_buffer();
     prepare_host_info_message_buffer();
+    prepare_servos_message_buffer();
     return true;
 }
 
@@ -233,6 +243,14 @@ bool init_subscribers() {
         ros_cfg::kHostInfoTopic,
         &host_info_sub_options));
     s_host_info_subscriber_initialized = true;
+
+    MICROROS_RCCHECK(rcl_subscription_init(
+        &s_servos_cmd_subscriber,
+        &s_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32MultiArray),
+        ros_cfg::kServosCmdTopic,
+        &sub_options));
+    s_servos_cmd_subscriber_initialized = true;
     return true;
 }
 
@@ -397,6 +415,10 @@ void destroy_ros_entities() {
         cleanup_result(rcl_subscription_fini(&s_servo_cmd_subscriber, &s_node));
         s_servo_cmd_subscriber_initialized = false;
     }
+    if (s_servos_cmd_subscriber_initialized) {
+        cleanup_result(rcl_subscription_fini(&s_servos_cmd_subscriber, &s_node));
+        s_servos_cmd_subscriber_initialized = false;
+    }
     if (s_host_info_subscriber_initialized) {
         cleanup_result(rcl_subscription_fini(&s_host_info_subscriber, &s_node));
         s_host_info_subscriber_initialized = false;
@@ -486,6 +508,24 @@ void take_servo_cmd_if_ready() {
     }
 }
 
+void take_servos_cmd_if_ready() {
+    if (s_wait_set.subscriptions[kServosCmdSubscriptionIndex] == nullptr) {
+        return;
+    }
+
+    // A failed nested layout decode must not reuse a previous valid offset.
+    // Some generated type support continues decoding data after layout failure.
+    s_servos_cmd_msg.layout.data_offset = UINT32_MAX;
+    s_servos_cmd_msg.data.size = 0;
+    const rcl_ret_t take_ret =
+        rcl_take(&s_servos_cmd_subscriber, &s_servos_cmd_msg, nullptr, nullptr);
+    if (take_ret == RCL_RET_OK) {
+        handle_servos_cmd(&s_servos_cmd_msg);
+    } else if (take_ret != RCL_RET_SUBSCRIPTION_TAKE_FAILED) {
+        ESP_LOGW(kTag, "rcl_take servos_cmd failed: %d", static_cast<int>(take_ret));
+    }
+}
+
 void take_host_info_if_ready() {
     if (s_wait_set.subscriptions[kHostInfoSubscriptionIndex] == nullptr) {
         return;
@@ -512,7 +552,8 @@ bool spin_once(int timeout_ms) {
     }
     if (!add_wait_set_subscription(&s_cmd_vel_subscriber) ||
         !add_wait_set_subscription(&s_servo_cmd_subscriber) ||
-        !add_wait_set_subscription(&s_host_info_subscriber)) {
+        !add_wait_set_subscription(&s_host_info_subscriber) ||
+        !add_wait_set_subscription(&s_servos_cmd_subscriber)) {
         return false;
     }
     ret = rcl_wait_set_add_timer(&s_wait_set, &s_publish_timer, nullptr);
@@ -534,6 +575,7 @@ bool spin_once(int timeout_ms) {
     take_cmd_vel_if_ready();
     take_servo_cmd_if_ready();
     take_host_info_if_ready();
+    take_servos_cmd_if_ready();
 
     if (s_wait_set.timers[0] != nullptr) {
         MICROROS_RCSOFTCHECK(rcl_timer_call(&s_publish_timer));
@@ -544,7 +586,7 @@ bool spin_once(int timeout_ms) {
 
 void log_active_transport(bool use_uart) {
     if (use_uart) {
-        ESP_LOGI(kTag, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
+        ESP_LOGI(kTag, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info,/servos_cmd, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
                  static_cast<int>(net_cfg::kMicroRosUartPort),
                  static_cast<int>(net_cfg::kMicroRosUartTxPin),
                  static_cast<int>(net_cfg::kMicroRosUartRxPin),
@@ -552,7 +594,7 @@ void log_active_transport(bool use_uart) {
         return;
     }
 
-    ESP_LOGI(kTag, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
+    ESP_LOGI(kTag, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info,/servos_cmd, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
              system_globals().runtime.microros_agent_ip,
              static_cast<unsigned>(system_globals().runtime.microros_agent_port));
 }

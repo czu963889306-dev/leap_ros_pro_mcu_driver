@@ -10,10 +10,12 @@
 #include "freertos/task.h"
 #include "msg/arm_msg.h"
 #include "msg/servo_msg.h"
+#include "msg/servos_msg.h"
+#include "servo_motion_plan.h"
 
 static const char *TAG = "ARM_TASK";
 namespace arm_cfg = leap_config::arm;
-static constexpr TickType_t kArmMoveDurationTicks = pdMS_TO_TICKS(arm_cfg::kArmMoveDurationMs);
+using namespace servo_motion;
 
 static ServoDriver *get_servo_by_index(size_t index) {
     switch (index) {
@@ -45,69 +47,6 @@ static void set_all_servo_angles(const float servo_deg[arm_cfg::kServoCount]) {
     for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
         set_servo_angle(i, servo_deg[i]);
     }
-}
-
-struct ServoMotionPlan {
-    bool active = false;
-    TickType_t start_tick = 0;
-    TickType_t duration_ticks = kArmMoveDurationTicks;
-    float start_deg[arm_cfg::kServoCount] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    float target_deg[arm_cfg::kServoCount] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-};
-
-static void copy_servo_angles(float dst[arm_cfg::kServoCount], const float src[arm_cfg::kServoCount]) {
-    for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
-        dst[i] = src[i];
-    }
-}
-
-static bool servo_angles_close(const float lhs[arm_cfg::kServoCount], const float rhs[arm_cfg::kServoCount]) {
-    for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
-        if (fabsf(lhs[i] - rhs[i]) > arm_cfg::kAngleEpsilonDeg) {
-            return false;
-        }
-    }
-    return true;
-}
-
-static void start_motion_plan(
-    ServoMotionPlan *plan,
-    const float current_deg[arm_cfg::kServoCount],
-    const float target_deg[arm_cfg::kServoCount],
-    TickType_t now_tick) {
-    if (plan == nullptr) {
-        return;
-    }
-
-    copy_servo_angles(plan->start_deg, current_deg);
-    copy_servo_angles(plan->target_deg, target_deg);
-    plan->start_tick = now_tick;
-    plan->duration_ticks = kArmMoveDurationTicks;
-    plan->active = true;
-}
-
-static bool update_motion_plan(
-    ServoMotionPlan *plan,
-    TickType_t now_tick,
-    float current_deg[arm_cfg::kServoCount]) {
-    if (plan == nullptr || !plan->active) {
-        return false;
-    }
-
-    const TickType_t elapsed_ticks = now_tick - plan->start_tick;
-    if (elapsed_ticks >= plan->duration_ticks) {
-        copy_servo_angles(current_deg, plan->target_deg);
-        plan->active = false;
-        return true;
-    }
-
-    const float progress = static_cast<float>(elapsed_ticks) /
-                           static_cast<float>(plan->duration_ticks);
-    for (size_t i = 0; i < 4; ++i) {
-        current_deg[i] = plan->start_deg[i] +
-                         (plan->target_deg[i] - plan->start_deg[i]) * progress;
-    }
-    return true;
 }
 
 static void publish_arm_state(
@@ -284,6 +223,18 @@ void arm_task(void *p) {
                          target_servo_deg[4]);
                 state_changed = true;
             }
+        }
+
+        ServosMsg servos_cmd = {};
+        if (system_globals().queues.servos_cmd != nullptr &&
+            xQueueReceive(system_globals().queues.servos_cmd, &servos_cmd, 0) == pdTRUE) {
+            // A complete batch wins if other arm commands arrive in the same cycle.
+            if (!servo_angles_close(current_servo_deg, servos_cmd.angles)) {
+                start_motion_plan(&motion_plan, current_servo_deg, servos_cmd.angles, now_tick);
+            } else {
+                motion_plan.active = false;
+            }
+            state_changed = true;
         }
 
         if (state_changed) {

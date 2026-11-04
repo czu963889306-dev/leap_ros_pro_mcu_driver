@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "msg/motion_msg.h"
 #include "msg/servo_msg.h"
+#include "msg/servos_msg.h"
 #include "system_globals.h"
 
 namespace microros {
@@ -89,6 +90,29 @@ void handle_servo_cmd_vector(const geometry_msgs__msg__Vector3 *msg) {
     servo_cmd.channel = static_cast<uint8_t>(channel);
     servo_cmd.angle = static_cast<float>(msg->y);
     xQueueOverwrite(system_globals().queues.servo_cmd, &servo_cmd);
+}
+
+void prepare_servos_message_buffer() {
+    // Fixed storage: exactly five angles, no layout dimensions or heap allocation.
+    // Reset on reconnect, but never call Float32MultiArray__fini on this buffer.
+    static float angles[leap_config::arm::kServoCount] = {};
+    s_servos_cmd_msg = {};
+    s_servos_cmd_msg.data.data = angles;
+    s_servos_cmd_msg.data.capacity = leap_config::arm::kServoCount;
+}
+
+void handle_servos_cmd(const std_msgs__msg__Float32MultiArray *msg) {
+    if (msg == nullptr || system_globals().queues.servos_cmd == nullptr) {
+        return;
+    }
+    ServosMsg cmd = {};
+    if (msg->layout.dim.size != 0 || msg->layout.data_offset != 0 ||
+        !make_servos_msg(msg->data.data, msg->data.size, &cmd)) {
+        ESP_LOGW(kTag, "Invalid servos_cmd: expected five angles in [0,180] and empty layout");
+        return;
+    }
+    // One queue write preserves the complete target, including the claw.
+    xQueueOverwrite(system_globals().queues.servos_cmd, &cmd);
 }
 
 void handle_host_info(const std_msgs__msg__String *msg) {
