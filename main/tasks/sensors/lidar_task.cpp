@@ -42,7 +42,7 @@ void lidar_task(void *p) {
                 if (!lidar_angle_visible(angle))
                     continue;
 
-                if (dist > 0) {
+                if (dist > kLidarMinimumDistanceMm) {
                     if (lidar_msg.distances[angle] == 0 ||
                         dist < lidar_msg.distances[angle]) {
                         lidar_msg.distances[angle] = dist;

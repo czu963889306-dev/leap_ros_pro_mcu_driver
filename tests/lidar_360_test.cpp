@@ -27,6 +27,8 @@ static std::vector<uint8_t> packet(int index) {
         uint16_t distance = 1000;
         if (index == 60 && i == 0) distance = 50;
         if (index == 60 && i == 2) distance = 700;
+        if (index == 61 && i == 0) distance = 60;
+        if (index == 61 && i == 1) distance = 61;
         put16(b, 6+i*3, distance);
     }
     uint16_t remainder = 0;
@@ -70,7 +72,8 @@ int main() {
     assert(scan.count == 360);
     for (int angle = 0; angle < 360; ++angle) {
         assert(scan.points[angle].angle == angle);
-        assert(scan.points[angle].distance == (angle == 180 ? 50 : 1000));
+        const float expected = angle == 180 ? 700 : angle == 183 ? 61 : 1000;
+        assert(scan.points[angle].distance == expected);
     }
-    std::puts("PASS: 1440 samples, 360 bins, 210-degree visibility, CRC and nearest nonzero distance");
+    std::puts("PASS: 1440 samples, 360 bins, 210-degree visibility and 60 mm filter boundary");
 }

@@ -94,9 +94,9 @@ bool Ldstl26Lidar::ProcessByte(uint8_t data, LidarPoint* out_scan, uint16_t* out
         // Preserve the original >50 raw valid samples needed to complete a turn.
         if (pt.distance > 0 && current_point_count_ <= 50) ++current_point_count_;
 
-        // Keep the nearest nonzero return in each one-degree bin.
+        // Filter near returns before choosing the nearest point in each bin.
         const int angle = static_cast<int>(pt.angle);
-        if (pt.distance > 0 && angle >= 0 &&
+        if (pt.distance > kLidarMinimumDistanceMm && angle >= 0 &&
             angle < MAX_LIDAR_POINTS_PER_SCAN) {
             const uint16_t distance = static_cast<uint16_t>(pt.distance);
             if (current_scan_[angle] == 0 || distance < current_scan_[angle]) {

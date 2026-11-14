@@ -6,6 +6,7 @@
 #include "driver/gpio.h"
 
 #define MAX_LIDAR_POINTS_PER_SCAN 360
+static constexpr uint16_t kLidarMinimumDistanceMm = 60;
 
 #define LDSTL26_PACKET_SIZE 47
 #define LDSTL26_POINTS_PER_PACKET 12
