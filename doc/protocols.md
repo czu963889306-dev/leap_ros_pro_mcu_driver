@@ -147,14 +147,14 @@ navigation command.
 | --- | --- | --- | --- | --- |
 | `/odom` | `nav_msgs/msg/Odometry` | 50 Hz | `odom` / `base_link` | Pose and body velocity for the selected chassis model |
 | `/imu` | `sensor_msgs/msg/Imu` | 50 Hz | `imu_link` | Quaternion, gyro, acceleration |
-| `/scan` | `sensor_msgs/msg/LaserScan` | 10 Hz | `laser_frame` | 360 points, 0.06-12.0 m |
+| `/scan` | `sensor_msgs/msg/LaserScan` | 10 Hz | `laser_frame` | 360 points, 0.10-12.0 m |
 | `/arm_pose` | `geometry_msgs/msg/Pose` | 50 Hz | n/a | Current arm Cartesian pose |
 | `/battery_state` | `sensor_msgs/msg/BatteryState` | 2 Hz | `battery` | Pack voltage in V and estimated percentage in 0..1 |
 | `/wifi_config` | `std_msgs/msg/String` | 1 Hz | n/a | Saved STA credentials as JSON: `{"ssid":"<name>","password":"<password>"}` |
 
-The lidar keeps 210 degrees centered on the forward direction: bins 0–104°
-and 255–359° are visible, while 105–254° are masked. Returns at or below
-60 mm are discarded before selecting the nearest valid return in each bin.
+The lidar uses its original approximately 180-degree forward field of view:
+bins 0–89° and 269–359° are visible, while 90–268° are masked. Returns at
+or below 100 mm are discarded before selecting the nearest valid return in each bin.
 
 ### Battery Measurement
 

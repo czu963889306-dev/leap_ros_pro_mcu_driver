@@ -27,8 +27,8 @@ static std::vector<uint8_t> packet(int index) {
         uint16_t distance = 1000;
         if (index == 60 && i == 0) distance = 50;
         if (index == 60 && i == 2) distance = 700;
-        if (index == 61 && i == 0) distance = 60;
-        if (index == 61 && i == 1) distance = 61;
+        if (index == 61 && i == 0) distance = 100;
+        if (index == 61 && i == 1) distance = 101;
         put16(b, 6+i*3, distance);
     }
     uint16_t remainder = 0;
@@ -58,10 +58,10 @@ int main() {
     for (int angle = 0; angle < 360; ++angle) {
         if (lidar_angle_visible(angle)) ++visible_count;
     }
-    assert(visible_count == 210);
-    assert(lidar_angle_visible(0) && lidar_angle_visible(104));
-    assert(!lidar_angle_visible(105) && !lidar_angle_visible(254));
-    assert(lidar_angle_visible(255) && lidar_angle_visible(359));
+    assert(visible_count == 181);
+    assert(lidar_angle_visible(0) && lidar_angle_visible(89));
+    assert(!lidar_angle_visible(90) && !lidar_angle_visible(268));
+    assert(lidar_angle_visible(269) && lidar_angle_visible(359));
     Ldstl26Lidar driver(1, -1, 41);
     driver.Init();
     Scan scan;
@@ -72,8 +72,8 @@ int main() {
     assert(scan.count == 360);
     for (int angle = 0; angle < 360; ++angle) {
         assert(scan.points[angle].angle == angle);
-        const float expected = angle == 180 ? 700 : angle == 183 ? 61 : 1000;
+        const float expected = angle == 180 ? 700 : angle == 183 ? 101 : 1000;
         assert(scan.points[angle].distance == expected);
     }
-    std::puts("PASS: 1440 samples, 360 bins, 210-degree visibility and 60 mm filter boundary");
+    std::puts("PASS: 1440 samples, 360 bins, original visibility and 100 mm filter boundary");
 }

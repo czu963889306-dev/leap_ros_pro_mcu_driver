@@ -38,7 +38,7 @@ void lidar_task(void *p) {
                 uint16_t dist = (uint16_t)full_scan_data[i].distance;
                 // 旋转180° + 左右镜像修正
                 angle = (180 - angle + 360) % 360;
-                // 保留前方 210°：0°~104° 和 255°~359°。
+                // 原始前方视野：0°~89° 和 269°~359°。
                 if (!lidar_angle_visible(angle))
                     continue;
 
