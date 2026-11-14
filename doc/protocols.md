@@ -18,7 +18,7 @@ firmware falls back to the default micro-ROS UART configuration.
 
 UDP uses the runtime agent address, default `192.168.31.214:8888`. UART uses
 UART0, GPIO43 TX, GPIO44 RX, 921600 baud, 8N1, without hardware flow control.
-In UART mode, the micro-ROS task waits 5 seconds before initializing UART0 and
+In UART mode, the micro-ROS task waits 8 seconds before initializing UART0 and
 connecting to the agent, leaving time for startup Wi-Fi/IP console logs.
 UDP starts after Wi-Fi STA connects. Neither transport requires a separate host
 handshake or heartbeat gate.
@@ -151,6 +151,10 @@ navigation command.
 | `/arm_pose` | `geometry_msgs/msg/Pose` | 50 Hz | n/a | Current arm Cartesian pose |
 | `/battery_state` | `sensor_msgs/msg/BatteryState` | 2 Hz | `battery` | Pack voltage in V and estimated percentage in 0..1 |
 | `/wifi_config` | `std_msgs/msg/String` | 1 Hz | n/a | Saved STA credentials as JSON: `{"ssid":"<name>","password":"<password>"}` |
+
+The lidar keeps 210 degrees centered on the forward direction: bins 0–104°
+and 255–359° are visible, while 105–254° are masked. Nonzero returns are
+retained at any distance.
 
 ### Battery Measurement
 

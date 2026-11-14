@@ -5,7 +5,8 @@
 #include "driver/uart.h"
 #include "driver/gpio.h"
 
-#define MAX_LIDAR_POINTS_PER_SCAN 500
+#define MAX_LIDAR_POINTS_PER_SCAN 360
+
 #define LDSTL26_PACKET_SIZE 47
 #define LDSTL26_POINTS_PER_PACKET 12
 
@@ -29,7 +30,7 @@ private:
     uint8_t packet_[LDSTL26_PACKET_SIZE];
 
     float last_angle_;
-    LidarPoint current_scan_[MAX_LIDAR_POINTS_PER_SCAN];
+    uint16_t current_scan_[MAX_LIDAR_POINTS_PER_SCAN] = {};
     uint16_t current_point_count_;
 
     bool ProcessByte(uint8_t data, LidarPoint* out_scan, uint16_t* out_count);

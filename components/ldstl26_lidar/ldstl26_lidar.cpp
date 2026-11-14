@@ -76,16 +76,33 @@ bool Ldstl26Lidar::ProcessByte(uint8_t data, LidarPoint* out_scan, uint16_t* out
         LidarPoint& pt = points[i];
 
         if (pt.angle < last_angle_ - 180.0f && current_point_count_ > 50) {
-            if (out_scan && out_count) {
-                memcpy(out_scan, current_scan_, current_point_count_ * sizeof(LidarPoint));
-                *out_count = current_point_count_;
+            uint16_t output_count = 0;
+            for (int angle = 0; angle < MAX_LIDAR_POINTS_PER_SCAN; ++angle) {
+                if (current_scan_[angle] == 0) continue;
+                if (out_scan && out_count) {
+                    out_scan[output_count] = {static_cast<float>(angle),
+                                              static_cast<float>(current_scan_[angle])};
+                }
+                ++output_count;
             }
+            if (out_scan && out_count) *out_count = output_count;
+            memset(current_scan_, 0, sizeof(current_scan_));
             current_point_count_ = 0;
             completed = true;
         }
 
-        if (pt.distance > 0 && current_point_count_ < MAX_LIDAR_POINTS_PER_SCAN)
-            current_scan_[current_point_count_++] = pt;
+        // Preserve the original >50 raw valid samples needed to complete a turn.
+        if (pt.distance > 0 && current_point_count_ <= 50) ++current_point_count_;
+
+        // Keep the nearest nonzero return in each one-degree bin.
+        const int angle = static_cast<int>(pt.angle);
+        if (pt.distance > 0 && angle >= 0 &&
+            angle < MAX_LIDAR_POINTS_PER_SCAN) {
+            const uint16_t distance = static_cast<uint16_t>(pt.distance);
+            if (current_scan_[angle] == 0 || distance < current_scan_[angle]) {
+                current_scan_[angle] = distance;
+            }
+        }
 
         last_angle_ = pt.angle;
     }

@@ -1,13 +1,13 @@
 #include "system_globals.h"
 #include "board_config.h"
 #include "ldstl26_lidar.h"
+#include "lidar_visibility.h"
 #include "network_config.h"
 #include "msg/lidar_msg.h"
 #include "esp_log.h"
 #include <string.h>
 
 static const char* TAG = "LIDAR_TASK";
-static constexpr uint16_t kInvalidObstacleDistanceMm = 100;
 namespace board_cfg = leap_config::board;
 namespace net_cfg = leap_config::network;
 
@@ -38,12 +38,11 @@ void lidar_task(void *p) {
                 uint16_t dist = (uint16_t)full_scan_data[i].distance;
                 // 旋转180° + 左右镜像修正
                 angle = (180 - angle + 360) % 360;
-                // 以 180° 为中心屏蔽 180°范围：90°~269°。
-                if (angle >= 90 && angle < 269)
+                // 保留前方 210°：0°~104° 和 255°~359°。
+                if (!lidar_angle_visible(angle))
                     continue;
 
-                // 10 cm 以内的障碍物视为无效点，不写入扫描数据。
-                if (dist > kInvalidObstacleDistanceMm) {
+                if (dist > 0) {
                     if (lidar_msg.distances[angle] == 0 ||
                         dist < lidar_msg.distances[angle]) {
                         lidar_msg.distances[angle] = dist;
