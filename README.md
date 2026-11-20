@@ -5,7 +5,7 @@ Leap ROS PRO 的 ESP32-S3 下位机固件，提供四轮底盘、机械臂舵机
 ## 主要功能
 
 - 支持四轮麦克纳姆轮和四轮差速模式，可在配网页选择并保存。
-- 支持 micro-ROS UART 和 Wi-Fi UDP，默认 UART；提供 `/cmd_vel`、`/servo_cmd`、`/odom`、`/imu`、`/scan`、`/arm_pose`、`/battery_state` 和 PID 参数服务。
+- 支持 micro-ROS UART 和 Wi-Fi UDP，默认 UART；提供 `/cmd_vel`、`/servo_cmd`、`/servo_angles_cmd`、`/servo_angles`、`/odom`、`/imu`、`/scan`、`/arm_pose`、`/battery_state` 和 PID 参数服务。
 - STL26 连接 UART1、RX GPIO41，波特率 230400。雷达按 360 个方向保存最近的有效回波，不再按每圈 500 个原始点截断；10 cm 及以内的回波被过滤。
 - 雷达角度按 `(180 - 原始角度 + 360) % 360` 映射，恢复原有约 180° 前方可见范围：`0°～89°` 和 `269°～359°`；`90°～268°` 被屏蔽。ROS `LaserScan` 声明的最小量程为 0.10 m。
 - 与 micro-ROS Agent 每 5 秒同步时间，失败后每秒重试；最近成功校准的时间最多保留 30 秒，时钟回拨时暂停带时间戳的发布以防时间戳倒退。
@@ -19,7 +19,7 @@ micro-ROS UART 使用 UART0、GPIO43 TX、GPIO44 RX、921600 波特率，默认�
 
 ## 构建与验证
 
-加载 ESP-IDF 环境后执行：
+已有旧版 micro-ROS 构建缓存的工程，请先按[协议说明](doc/protocols.md#published-topics)中的步骤更新接口并重编静态库。首次构建时加载 ESP-IDF 环境后执行：
 
 ```bash
 idf.py build

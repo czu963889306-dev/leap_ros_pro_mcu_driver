@@ -167,12 +167,20 @@ void publish_battery(int64_t stamp_ms) {
     MICROROS_RCSOFTCHECK(rcl_publish(&s_battery_publisher, &s_battery_msg, nullptr));
 }
 
-void publish_arm_pose() {
+void publish_arm_state() {
     ArmMsg arm = {};
-    if (system_globals().queues.arm_state == nullptr || xQueuePeek(system_globals().queues.arm_state, &arm, 0) != pdTRUE || !arm.valid) {
+    if (system_globals().queues.arm_state == nullptr || xQueuePeek(system_globals().queues.arm_state, &arm, 0) != pdTRUE) {
         return;
     }
 
+    if ((s_publish_tick % ros_cfg::kServoAnglesPublishDivider) == 0) {
+        leap_interfaces__msg__ServoAngles angles = {};
+        memcpy(angles.angles_deg, arm.servo_deg, sizeof(angles.angles_deg));
+        MICROROS_RCSOFTCHECK(rcl_publish(&s_servo_angles_publisher, &angles, nullptr));
+    }
+    if (!arm.valid) {
+        return;
+    }
     const double pitch_rad = arm.pitch_deg * ros_cfg::kDegToRad;
     s_arm_pose_msg.position.x = arm.x;
     s_arm_pose_msg.position.y = arm.y;
@@ -238,7 +246,7 @@ void publish_state_timer(rcl_timer_t *timer, int64_t) {
         }
     }
     // These messages have no header stamp and do not need a synchronized clock.
-    publish_arm_pose();
+    publish_arm_state();
     if ((s_publish_tick % ros_cfg::kWifiConfigPublishTicks) == 0) {
         publish_wifi_config();
     }

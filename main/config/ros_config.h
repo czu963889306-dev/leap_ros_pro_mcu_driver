@@ -7,8 +7,8 @@ namespace leap_config {
 namespace ros {
 
 static constexpr size_t kLaserScanPointCount = 360;
-// odom, imu, scan, arm_pose, wifi_config, battery_state; rosout is disabled.
-static constexpr size_t kPublisherCount = 6;
+// odom, imu, scan, arm_pose, wifi_config, battery_state, servo_angles; rosout is disabled.
+static constexpr size_t kPublisherCount = 7;
 static constexpr double kDegToRad = 0.017453292519943295;
 static constexpr double kGravity = 9.80665;
 
@@ -31,6 +31,8 @@ static constexpr const char kArmPoseTopic[] = "arm_pose";
 static constexpr const char kWifiConfigTopic[] = "wifi_config";
 static constexpr const char kCmdVelTopic[] = "cmd_vel";
 static constexpr const char kServoCmdTopic[] = "servo_cmd";
+static constexpr const char kServoAnglesCmdTopic[] = "servo_angles_cmd";
+static constexpr const char kServoAnglesTopic[] = "servo_angles";
 static constexpr const char kHostInfoTopic[] = "host_info";
 static constexpr const char kSetArmPoseService[] = "set_arm_pose";
 static constexpr const char kSetSpeedPidService[] = "set_speed_pid";
@@ -38,6 +40,7 @@ static constexpr const char kGetSpeedPidService[] = "get_speed_pid";
 
 static constexpr uint32_t kPublishPeriodMs = 20;
 static constexpr uint32_t kBatteryPublishDivider = 25; // 2 Hz.
+static constexpr uint32_t kServoAnglesPublishDivider = 5; // 10 Hz.
 static constexpr uint32_t kScanPublishDivider = 5;
 static constexpr float kScanTimeS = 0.1f;
 static constexpr float kLaserRangeMinM = 0.10f;

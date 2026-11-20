@@ -29,22 +29,27 @@ enum WaitSetSubscriptionIndex : size_t {
     kCmdVelSubscriptionIndex = 0,
     kServoCmdSubscriptionIndex = 1,
     kHostInfoSubscriptionIndex = 2,
-    kSubscriptionCount = 3,
+    kServoAnglesCmdSubscriptionIndex,
+    kSubscriptionCount,
 };
 
 constexpr size_t kPublishTimerCount = 1;
 static_assert(RMW_UXRCE_MAX_PUBLISHERS == ros_cfg::kPublisherCount,
               "Publisher limit mismatch: rebuild libmicroros with app-colcon.meta");
+static_assert(RMW_UXRCE_MAX_SUBSCRIPTIONS == kSubscriptionCount,
+              "Subscription limit mismatch: rebuild libmicroros with app-colcon.meta");
 
 void reset_ros_handles() {
     s_odom_publisher = rcl_get_zero_initialized_publisher();
     s_imu_publisher = rcl_get_zero_initialized_publisher();
     s_battery_publisher = rcl_get_zero_initialized_publisher();
     s_scan_publisher = rcl_get_zero_initialized_publisher();
+    s_servo_angles_publisher = rcl_get_zero_initialized_publisher();
     s_arm_pose_publisher = rcl_get_zero_initialized_publisher();
     s_wifi_config_publisher = rcl_get_zero_initialized_publisher();
     s_cmd_vel_subscriber = rcl_get_zero_initialized_subscription();
     s_servo_cmd_subscriber = rcl_get_zero_initialized_subscription();
+    s_servo_angles_cmd_subscriber = rcl_get_zero_initialized_subscription();
     s_host_info_subscriber = rcl_get_zero_initialized_subscription();
     s_set_arm_pose_service = rcl_get_zero_initialized_service();
     s_set_speed_pid_service = rcl_get_zero_initialized_service();
@@ -190,6 +195,14 @@ bool init_publishers() {
         &state_pub_options));
     s_arm_pose_publisher_initialized = true;
 
+    MICROROS_RCCHECK(rcl_publisher_init(
+        &s_servo_angles_publisher,
+        &s_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(leap_interfaces, msg, ServoAngles),
+        ros_cfg::kServoAnglesTopic,
+        &state_pub_options));
+    s_servo_angles_publisher_initialized = true;
+
     rcl_publisher_options_t wifi_config_pub_options = rcl_publisher_get_default_options();
     wifi_config_pub_options.qos = rmw_qos_profile_sensor_data;
     s_wifi_config_publisher = rcl_get_zero_initialized_publisher();
@@ -224,6 +237,14 @@ bool init_subscribers() {
         ros_cfg::kServoCmdTopic,
         &sub_options));
     s_servo_cmd_subscriber_initialized = true;
+
+    MICROROS_RCCHECK(rcl_subscription_init(
+        &s_servo_angles_cmd_subscriber,
+        &s_node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(leap_interfaces, msg, ServoAngles),
+        ros_cfg::kServoAnglesCmdTopic,
+        &sub_options));
+    s_servo_angles_cmd_subscriber_initialized = true;
 
     rcl_subscription_options_t host_info_sub_options = rcl_subscription_get_default_options();
     MICROROS_RCCHECK(rcl_subscription_init(
@@ -373,6 +394,10 @@ void destroy_ros_entities() {
         cleanup_result(rcl_publisher_fini(&s_battery_publisher, &s_node));
         s_battery_publisher_initialized = false;
     }
+    if (s_servo_angles_publisher_initialized) {
+        cleanup_result(rcl_publisher_fini(&s_servo_angles_publisher, &s_node));
+        s_servo_angles_publisher_initialized = false;
+    }
     if (s_arm_pose_publisher_initialized) {
         cleanup_result(rcl_publisher_fini(&s_arm_pose_publisher, &s_node));
         s_arm_pose_publisher_initialized = false;
@@ -396,6 +421,10 @@ void destroy_ros_entities() {
     if (s_servo_cmd_subscriber_initialized) {
         cleanup_result(rcl_subscription_fini(&s_servo_cmd_subscriber, &s_node));
         s_servo_cmd_subscriber_initialized = false;
+    }
+    if (s_servo_angles_cmd_subscriber_initialized) {
+        cleanup_result(rcl_subscription_fini(&s_servo_angles_cmd_subscriber, &s_node));
+        s_servo_angles_cmd_subscriber_initialized = false;
     }
     if (s_host_info_subscriber_initialized) {
         cleanup_result(rcl_subscription_fini(&s_host_info_subscriber, &s_node));
@@ -486,6 +515,20 @@ void take_servo_cmd_if_ready() {
     }
 }
 
+void take_servo_angles_cmd_if_ready() {
+    if (s_wait_set.subscriptions[kServoAnglesCmdSubscriptionIndex] == nullptr) {
+        return;
+    }
+
+    const rcl_ret_t take_ret =
+        rcl_take(&s_servo_angles_cmd_subscriber, &s_servo_angles_cmd_msg, nullptr, nullptr);
+    if (take_ret == RCL_RET_OK) {
+        handle_servo_angles_cmd(s_servo_angles_cmd_msg);
+    } else if (take_ret != RCL_RET_SUBSCRIPTION_TAKE_FAILED) {
+        ESP_LOGW(kTag, "rcl_take failed: %d", static_cast<int>(take_ret));
+    }
+}
+
 void take_host_info_if_ready() {
     if (s_wait_set.subscriptions[kHostInfoSubscriptionIndex] == nullptr) {
         return;
@@ -512,7 +555,8 @@ bool spin_once(int timeout_ms) {
     }
     if (!add_wait_set_subscription(&s_cmd_vel_subscriber) ||
         !add_wait_set_subscription(&s_servo_cmd_subscriber) ||
-        !add_wait_set_subscription(&s_host_info_subscriber)) {
+        !add_wait_set_subscription(&s_host_info_subscriber) ||
+        !add_wait_set_subscription(&s_servo_angles_cmd_subscriber)) {
         return false;
     }
     ret = rcl_wait_set_add_timer(&s_wait_set, &s_publish_timer, nullptr);
@@ -534,6 +578,7 @@ bool spin_once(int timeout_ms) {
     take_cmd_vel_if_ready();
     take_servo_cmd_if_ready();
     take_host_info_if_ready();
+    take_servo_angles_cmd_if_ready();
 
     if (s_wait_set.timers[0] != nullptr) {
         MICROROS_RCSOFTCHECK(rcl_timer_call(&s_publish_timer));
@@ -544,7 +589,7 @@ bool spin_once(int timeout_ms) {
 
 void log_active_transport(bool use_uart) {
     if (use_uart) {
-        ESP_LOGI(kTag, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
+        ESP_LOGI(kTag, "micro-ROS UART active: UART%d TX=%d RX=%d baud=%d, pub=/odom,/imu,/scan,/arm_pose,/servo_angles,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/servo_angles_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
                  static_cast<int>(net_cfg::kMicroRosUartPort),
                  static_cast<int>(net_cfg::kMicroRosUartTxPin),
                  static_cast<int>(net_cfg::kMicroRosUartRxPin),
@@ -552,7 +597,7 @@ void log_active_transport(bool use_uart) {
         return;
     }
 
-    ESP_LOGI(kTag, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
+    ESP_LOGI(kTag, "micro-ROS UDP active: agent=%s:%u, pub=/odom,/imu,/scan,/arm_pose,/servo_angles,/wifi_config,/battery_state, sub=/cmd_vel,/servo_cmd,/servo_angles_cmd,/host_info, srv=/set_arm_pose,/set_speed_pid,/get_speed_pid",
              system_globals().runtime.microros_agent_ip,
              static_cast<unsigned>(system_globals().runtime.microros_agent_port));
 }

@@ -11,6 +11,7 @@
 #include "geometry_msgs/msg/pose.h"
 #include "geometry_msgs/msg/vector3.h"
 #include "geometry_msgs/msg/twist.h"
+#include "leap_interfaces/msg/servo_angles.h"
 #include "leap_interfaces/srv/get_speed_pid.h"
 #include "leap_interfaces/srv/set_arm_pose.h"
 #include "leap_interfaces/srv/set_speed_pid.h"
@@ -52,6 +53,7 @@ extern bool s_uart_transport_initialized;
 
 extern geometry_msgs__msg__Twist s_cmd_vel_msg;
 extern geometry_msgs__msg__Vector3 s_servo_cmd_msg;
+extern leap_interfaces__msg__ServoAngles s_servo_angles_cmd_msg;
 extern std_msgs__msg__String s_host_info_msg;
 extern std_msgs__msg__String s_wifi_config_msg;
 extern geometry_msgs__msg__Pose s_arm_pose_msg;
@@ -64,10 +66,12 @@ extern rcl_publisher_t s_odom_publisher;
 extern rcl_publisher_t s_imu_publisher;
 extern rcl_publisher_t s_battery_publisher;
 extern rcl_publisher_t s_scan_publisher;
+extern rcl_publisher_t s_servo_angles_publisher;
 extern rcl_publisher_t s_arm_pose_publisher;
 extern rcl_publisher_t s_wifi_config_publisher;
 extern rcl_subscription_t s_cmd_vel_subscriber;
 extern rcl_subscription_t s_servo_cmd_subscriber;
+extern rcl_subscription_t s_servo_angles_cmd_subscriber;
 extern rcl_subscription_t s_host_info_subscriber;
 extern rcl_service_t s_set_arm_pose_service;
 extern rcl_service_t s_set_speed_pid_service;
@@ -100,10 +104,12 @@ extern bool s_imu_publisher_initialized;
 extern bool s_battery_msg_initialized;
 extern bool s_battery_publisher_initialized;
 extern bool s_scan_publisher_initialized;
+extern bool s_servo_angles_publisher_initialized;
 extern bool s_arm_pose_publisher_initialized;
 extern bool s_wifi_config_publisher_initialized;
 extern bool s_cmd_vel_subscriber_initialized;
 extern bool s_servo_cmd_subscriber_initialized;
+extern bool s_servo_angles_cmd_subscriber_initialized;
 extern bool s_host_info_subscriber_initialized;
 extern bool s_set_arm_pose_service_initialized;
 extern bool s_set_speed_pid_service_initialized;
@@ -126,6 +132,7 @@ void prepare_host_info_message_buffer();
 void prepare_wifi_config_message_buffer();
 void handle_cmd_vel(const geometry_msgs__msg__Twist *msg);
 void handle_servo_cmd_vector(const geometry_msgs__msg__Vector3 *msg);
+void handle_servo_angles_cmd(const leap_interfaces__msg__ServoAngles &msg);
 void handle_host_info(const std_msgs__msg__String *msg);
 void reset_host_info_state();
 

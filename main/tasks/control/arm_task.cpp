@@ -103,7 +103,7 @@ static bool update_motion_plan(
 
     const float progress = static_cast<float>(elapsed_ticks) /
                            static_cast<float>(plan->duration_ticks);
-    for (size_t i = 0; i < 4; ++i) {
+    for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
         current_deg[i] = plan->start_deg[i] +
                          (plan->target_deg[i] - plan->start_deg[i]) * progress;
     }
@@ -121,7 +121,7 @@ static void publish_arm_state(
     ArmMsg state = {};
     state.mode = ARM_CMD_JOINT_SERVO_DEG;
     state.valid = valid;
-    for (size_t i = 0; i < arm_cfg::kArmServoCount; ++i) {
+    for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
         state.servo_deg[i] = servo_deg[i];
     }
 
@@ -245,20 +245,15 @@ void arm_task(void *p) {
                 }
             } else if (arm_cmd.mode == ARM_CMD_JOINT_SERVO_DEG) {
                 float target_servo_deg[arm_cfg::kServoCount] = {};
-                copy_servo_angles(target_servo_deg, current_servo_deg);
-                for (size_t i = 0; i < arm_cfg::kArmServoCount; ++i) {
-                    if (isfinite(arm_cmd.servo_deg[i])) {
-                        target_servo_deg[i] = arm_cmd.servo_deg[i];
-                    }
+                for (size_t i = 0; i < arm_cfg::kServoCount; ++i) {
+                    target_servo_deg[i] = arm_cmd.servo_deg[i];
                 }
-                motion_plan.active = false;
-                start_motion_plan(&motion_plan, current_servo_deg, target_servo_deg, now_tick);
-                ESP_LOGI(TAG, "Joint servo target: servo=[%.1f, %.1f, %.1f, %.1f]",
-                         target_servo_deg[0],
-                         target_servo_deg[1],
-                         target_servo_deg[2],
-                         target_servo_deg[3]);
-                state_changed = true;
+                // Repeated setpoints must not restart an in-flight interpolation.
+                const float *previous_target = motion_plan.active ? motion_plan.target_deg : current_servo_deg;
+                if (!servo_angles_close(previous_target, target_servo_deg)) {
+                    start_motion_plan(&motion_plan, current_servo_deg, target_servo_deg, now_tick);
+                    state_changed = true;
+                }
             }
         }
 
@@ -268,7 +263,7 @@ void arm_task(void *p) {
                 const size_t index = static_cast<size_t>(servo_cmd.channel - 1);
                 float target_servo_deg[arm_cfg::kServoCount] = {};
                 copy_servo_angles(target_servo_deg, current_servo_deg);
-                target_servo_deg[index] = servo_cmd.angle;
+                target_servo_deg[index] = fminf(180.0f, fmaxf(0.0f, servo_cmd.angle));
                 if (!servo_angles_close(current_servo_deg, target_servo_deg)) {
                     start_motion_plan(&motion_plan, current_servo_deg, target_servo_deg, now_tick);
                 } else {

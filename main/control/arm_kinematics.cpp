@@ -37,8 +37,10 @@ bool ArmKinematics::Inverse(const ArmPose &pose, ArmJoints *joints) const {
         return false;
     }
 
-    const float base_rad = atan2f(pose.y + p, pose.x);
-    const float length = sqrtf((pose.y + p) * (pose.y + p) + pose.x * pose.x);
+    // The base pivot is at (-p, 0). Base angle increases from +Y toward +X.
+    const float x_from_pivot = pose.x + p;
+    const float base_rad = atan2f(x_from_pivot, pose.y);
+    const float length = hypotf(x_from_pivot, pose.y);
     const float height = pose.z;
 
     float requested_alpha_deg = (isfinite(pose.alpha_rad) ? pose.alpha_rad : pose.pitch_rad) * kRadToDeg;
@@ -139,8 +141,8 @@ bool ArmKinematics::Forward(const ArmJoints &joints, ArmPose *pose) const {
                          a4 * cosf(joints.shoulder_rad + joints.elbow_rad + joints.wrist_rad);
     const float alpha = joints.shoulder_rad + joints.elbow_rad + joints.wrist_rad;
 
-    pose->x = length * cosf(joints.base_rad);
-    pose->y = length * sinf(joints.base_rad) - p;
+    pose->x = length * sinf(joints.base_rad) - p;
+    pose->y = length * cosf(joints.base_rad);
     pose->z = height;
     pose->alpha_rad = alpha;
     pose->pitch_rad = alpha;

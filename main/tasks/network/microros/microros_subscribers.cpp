@@ -1,8 +1,10 @@
 #include "microros_internal.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "esp_log.h"
+#include "msg/arm_msg.h"
 #include "msg/motion_msg.h"
 #include "msg/servo_msg.h"
 #include "system_globals.h"
@@ -89,6 +91,23 @@ void handle_servo_cmd_vector(const geometry_msgs__msg__Vector3 *msg) {
     servo_cmd.channel = static_cast<uint8_t>(channel);
     servo_cmd.angle = static_cast<float>(msg->y);
     xQueueOverwrite(system_globals().queues.servo_cmd, &servo_cmd);
+}
+
+void handle_servo_angles_cmd(const leap_interfaces__msg__ServoAngles &msg) {
+    if (system_globals().queues.arm_cmd == nullptr) {
+        return;
+    }
+    ArmMsg cmd = {};
+    cmd.mode = ARM_CMD_JOINT_SERVO_DEG;
+    static_assert(sizeof(msg.angles_deg) == sizeof(cmd.servo_deg));
+    for (size_t i = 0; i < leap_config::arm::kServoCount; ++i) {
+        const float angle = msg.angles_deg[i];
+        if (!isfinite(angle) || angle < 0.0f || angle > 180.0f) {
+            return;
+        }
+        cmd.servo_deg[i] = angle;
+    }
+    xQueueOverwrite(system_globals().queues.arm_cmd, &cmd);
 }
 
 void handle_host_info(const std_msgs__msg__String *msg) {

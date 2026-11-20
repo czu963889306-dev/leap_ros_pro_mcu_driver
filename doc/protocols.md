@@ -118,6 +118,7 @@ effective differential track width is `340 mm`.
 | --- | --- | --- |
 | `/cmd_vel` | `geometry_msgs/msg/Twist` | `linear.x/y` m/s to `vx/vy` mm/s; `angular.z` to `wz` rad/s |
 | `/servo_cmd` | `geometry_msgs/msg/Vector3` | `x` = servo channel 1..5; `y` = angle in degrees |
+| `/servo_angles_cmd` | `leap_interfaces/msg/ServoAngles` | Five targets in `angles_deg`, channels 1..5. All must be finite and within 0..180 degrees. Accepted targets share a 1 s linear interpolation. |
 | `/host_info` | `std_msgs/msg/String` | Optional target host info text: `hostname=<name> ip=<ipv4>` or `hostname=<name> hostip=<ipv4>` |
 
 Receiving `/cmd_vel` writes velocity mode to `q_motion_cmd` and clears the
@@ -149,6 +150,7 @@ navigation command.
 | `/imu` | `sensor_msgs/msg/Imu` | 50 Hz | `imu_link` | Quaternion, gyro, acceleration |
 | `/scan` | `sensor_msgs/msg/LaserScan` | 10 Hz | `laser_frame` | 360 points, 0.10-12.0 m |
 | `/arm_pose` | `geometry_msgs/msg/Pose` | 50 Hz | n/a | Current arm Cartesian pose |
+| `/servo_angles` | `leap_interfaces/msg/ServoAngles` | 10 Hz | n/a | Current interpolated PWM command angles in degrees for channels 1..5, including the claw. Published during motion and at rest using best-effort QoS. |
 | `/battery_state` | `sensor_msgs/msg/BatteryState` | 2 Hz | `battery` | Pack voltage in V and estimated percentage in 0..1 |
 | `/wifi_config` | `std_msgs/msg/String` | 1 Hz | n/a | Saved STA credentials as JSON: `{"ssid":"<name>","password":"<password>"}` |
 
@@ -189,16 +191,16 @@ The JSON `battery` object contains `valid`, `voltage_v`, `adc_voltage_v`,
 The web page reads the same battery queue without consuming it or requiring a
 micro-ROS agent connection.
 
-There are exactly **6 publishers**, matching `RMW_UXRCE_MAX_PUBLISHERS=6` in
-`app-colcon.meta`; rosout is disabled. There are still 3 subscriptions and
-3 services, each with its own pool. A compile-time check rejects a stale
-micro-ROS header with a different publisher limit.
+The node uses 7 publishers, 4 subscriptions and 3 services with rosout
+disabled. The firmware checks the publisher and subscription limits against
+the micro-ROS headers at compile time.
 
-The managed component caches `libmicroros.a`; changing `app-colcon.meta`
-alone does not rebuild it. To rebuild the cached library from existing
-sources after changing the limit, run in the ESP-IDF environment:
+The managed component caches both the custom interface sources and
+`libmicroros.a`. To rebuild an existing checkout with the new interface and
+pool sizes, run in the ESP-IDF environment from the project root:
 
 ```bash
+cp -R extra_ros_packages/leap_interfaces managed_components/micro_ros_espidf_component/micro_ros_src/src/extra_packages/
 touch managed_components/micro_ros_espidf_component/esp32_toolchain.cmake
 rm -f managed_components/micro_ros_espidf_component/libmicroros.a
 rm -rf managed_components/micro_ros_espidf_component/include

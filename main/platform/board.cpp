@@ -26,11 +26,11 @@ const TickType_t kServoStartupDelayTicks = pdMS_TO_TICKS(arm_cfg::kServoStartupD
 // ================= 对象实例化 =================
 Lsm6ds3Imu imu(board_cfg::kImuI2cPort, board_cfg::kImuSdaPin, board_cfg::kImuSclPin);
 
-// Motor polarity is inverted here so SetSpeed(+) matches chassis forward.
-At8236Motor motor_fl(board_cfg::kMotorFlIn2, board_cfg::kMotorFlIn1);
-At8236Motor motor_fr(board_cfg::kMotorFrIn2, board_cfg::kMotorFrIn1);
-At8236Motor motor_bl(board_cfg::kMotorBlIn2, board_cfg::kMotorBlIn1);
-At8236Motor motor_br(board_cfg::kMotorBrIn2, board_cfg::kMotorBrIn1);
+// Map each motor's output channels to the configured IN1/IN2 pins.
+At8236Motor motor_fl(board_cfg::kMotorFlIn1, board_cfg::kMotorFlIn2);
+At8236Motor motor_fr(board_cfg::kMotorFrIn1, board_cfg::kMotorFrIn2);
+At8236Motor motor_bl(board_cfg::kMotorBlIn1, board_cfg::kMotorBlIn2);
+At8236Motor motor_br(board_cfg::kMotorBrIn1, board_cfg::kMotorBrIn2);
 
 // 实例化编码器
 QuadratureEncoder encoder_fl(board_cfg::kEncoderFlA, board_cfg::kEncoderFlB);
