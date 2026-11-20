@@ -113,6 +113,7 @@ bool init_context() {
     s_init_options = rcl_get_zero_initialized_init_options();
     MICROROS_RCCHECK(rcl_init_options_init(&s_init_options, s_allocator));
     s_init_options_initialized = true;
+    MICROROS_RCCHECK(rcl_init_options_set_domain_id(&s_init_options, ros_cfg::kAgentAssignedDomainId));
 
     // Keep the agent availability check used by the reference UART transport;
     // this is independent of the removed UART start-command handshake.
@@ -616,6 +617,8 @@ void microros_runtime_loop(void) {
         vTaskDelay(pdMS_TO_TICKS(net_cfg::kMicroRosUartStartupDelayMs));
     }
 
+    TickType_t last_ping_tick = 0;
+    unsigned missed_pings = 0;
     while (1) {
         const bool use_udp = system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRos;
         const bool use_uart = system_globals().runtime.wifi_comm_mode == WifiCommMode::kMicroRosUart;
@@ -623,6 +626,8 @@ void microros_runtime_loop(void) {
             if (!s_ros_created) {
                 const bool transport_ready = use_uart ? setup_uart_transport() : setup_udp_transport();
                 if (transport_ready && create_ros_entities()) {
+                    last_ping_tick = xTaskGetTickCount();
+                    missed_pings = 0;
                     log_active_transport(use_uart);
                 } else {
                     destroy_ros_entities();
@@ -630,8 +635,18 @@ void microros_runtime_loop(void) {
                     continue;
                 }
             }
-            if (!spin_once(20)) {
-                ESP_LOGW(kTag, "micro-ROS transport stopped; recreating session");
+            const TickType_t now = xTaskGetTickCount();
+            if (now - last_ping_tick >= pdMS_TO_TICKS(ros_cfg::kSessionPingIntervalMs)) {
+                last_ping_tick = now;
+                // With an active context this probes the existing XRCE session.
+                if (rmw_uros_ping_agent(ros_cfg::kSessionPingTimeoutMs, 1) == RMW_RET_OK) {
+                    missed_pings = 0;
+                } else {
+                    ++missed_pings;
+                }
+            }
+            if (missed_pings >= ros_cfg::kSessionPingFailureLimit || !spin_once(20)) {
+                ESP_LOGW(kTag, "Recreating micro-ROS session (consecutive missed pings: %u)", missed_pings);
                 destroy_ros_entities();
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;

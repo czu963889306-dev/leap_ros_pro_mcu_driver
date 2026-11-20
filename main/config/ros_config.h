@@ -47,6 +47,11 @@ static constexpr float kLaserRangeMinM = 0.10f;
 static constexpr float kLaserRangeMaxM = 12.0f;
 static constexpr int kInitialAgentPingTimeoutMs = 300;
 static constexpr uint8_t kInitialAgentPingAttempts = 3;
+// XRCE reserved value: the Agent supplies the participant's DDS domain.
+static constexpr size_t kAgentAssignedDomainId = 255;
+static constexpr uint32_t kSessionPingIntervalMs = 1000;
+static constexpr int kSessionPingTimeoutMs = 50;
+static constexpr unsigned kSessionPingFailureLimit = 3;
 static constexpr int kTimeSyncTimeoutMs = 1000;
 // Runtime sync runs on the ROS task, so bound its wait separately from startup.
 static constexpr int kTimeSyncRuntimeTimeoutMs = 50;

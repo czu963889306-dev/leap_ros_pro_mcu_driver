@@ -15,6 +15,15 @@ Leap ROS PRO 的 ESP32-S3 下位机固件，提供四轮底盘、机械臂舵机
 
 micro-ROS UART 使用 UART0、GPIO43 TX、GPIO44 RX、921600 波特率，默认启动等待 8 秒。UDP 默认 Agent 地址为 `192.168.31.214:8888`；运行模式、Agent 地址和底盘模式可在配网页配置并保存。
 
+ESP32 每秒检查一次当前 XRCE 会话，连续三次无响应后释放并重新创建节点、话题和服务。上位机更换 ROS 域时，在 Agent 启动脚本中从当前 `ROS_DOMAIN_ID` 取值。例如 UDP 模式可以这样启动：
+
+```bash
+export XRCE_DOMAIN_ID_OVERRIDE="${ROS_DOMAIN_ID:-0}"
+exec ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+```
+
+UART 模式沿用现有的串口启动命令，在它前面执行同一行 `export`。固件使用保留值 255，需要支持域覆盖的 Agent。若由 systemd 或 Docker 启动，请让服务或容器与上位机 ROS 2 应用读取同一份持久化的 `ROS_DOMAIN_ID` 配置，例如 `42`。[Agent 域配置说明](https://micro-xrce-dds.docs.eprosima.com/en/stable/agent.html#domain-id)
+
 硬件引脚、雷达串口、底盘参数与同步周期分别位于 `main/config/board_config.h`、`network_config.h`、`motion_config.h` 和 `ros_config.h`。完整话题、机械臂接口及底盘运动学见 [协议说明](doc/protocols.md)。
 
 ## 构建与验证
